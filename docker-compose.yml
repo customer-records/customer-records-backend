@@ -1,0 +1,161 @@
+services:
+  db:
+    image: postgres:13
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5438:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  database-init:
+    build: ./service-database
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gateway:
+    build: ./gateway
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  auth:
+    build: ./service-auth
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  calendar:
+    build: ./service-calendar
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  telegram-bot:
+    build: ./service-telegram-bot
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  parser:
+    build: ./service-parser
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  telegram-code-sender:
+    build: ./service-telegram-code-sender
+    env_file:
+      - .env
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    ports:
+      - "7000:7000"
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+  whatsapp-code-sender:
+    build: ./service-whatsapp-code-sender
+    env_file:
+      - .env
+    environment:
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    ports:
+      - "7001:7001"
+    volumes:
+      - whatsapp-session:/app/.wwebjs_auth
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+    depends_on:
+      db:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  whatsapp-session:
