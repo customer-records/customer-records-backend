@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 import time
 import bcrypt
-from datetime import datetime
+from datetime import datetime, time as dt_time, timedelta
 from models import Base, User, CategoryService, TimeSlot, Client, OnlineRegistration, CompanyDescription
 
 # Настройка логгера
@@ -21,6 +21,41 @@ DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@
 logger.info(f"Подключение к базе данных по URL: {DATABASE_URL}")
 engine = create_engine(DATABASE_URL)
 
+# График работы специалистов
+WORK_SCHEDULE = {
+    "Гадисов Ренат Фамильевич": {
+        "days": ["ПТ", "СБ"],
+        "hours": ("9:00", "13:00"),
+        "duration": 10
+    },
+    "Сергеев Ринат Леонидович": {
+        "days": ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"],
+        "hours": ("9:00", "19:00"),
+        "duration": 15
+    },
+    "Бареева Светлана Геннадьевна": {
+        "days": ["ВТ", "СР"],
+        "hours": ("9:00", "14:00"),
+        "duration": 15
+    },
+    "Шарипова Альфия Маратовна": {
+        "days": ["СР", "ЧТ"],
+        "hours": ("15:00", "19:00"),
+        "duration": 15
+    }
+}
+
+# Соответствие номеров дней недели и их обозначений
+WEEKDAYS = {
+    0: "ПН",
+    1: "ВТ",
+    2: "СР",
+    3: "ЧТ",
+    4: "ПТ",
+    5: "СБ",
+    6: "ВС"
+}
+
 # Ожидание подключения к базе данных
 def wait_for_db(engine, retries=5, delay=5):
     for i in range(retries):
@@ -32,6 +67,26 @@ def wait_for_db(engine, retries=5, delay=5):
             logger.error(f"Попытка {i + 1}/{retries}: Не удалось подключиться к базе данных. Ошибка: {e}")
             time.sleep(delay)
     raise Exception("Не удалось подключиться к базе данных после нескольких попыток.")
+
+def generate_time_slots(start_time_str, end_time_str, duration_minutes, date, worker_id, category_id):
+    slots = []
+    start_time = datetime.strptime(start_time_str, "%H:%M").time()
+    end_time = datetime.strptime(end_time_str, "%H:%M").time()
+    
+    current_time = datetime.combine(date, start_time)
+    end_datetime = datetime.combine(date, end_time)
+    
+    while current_time + timedelta(minutes=duration_minutes) <= end_datetime:
+        slots.append(TimeSlot(
+            id_category_service=category_id,
+            id_employer=worker_id,
+            date=date,
+            time_start=current_time.time(),
+            id_time_width_minutes_end=category_id
+        ))
+        current_time += timedelta(minutes=duration_minutes)
+    
+    return slots
 
 def initialize_db():
     # Ожидаем доступность БД
@@ -185,143 +240,48 @@ def initialize_db():
             session.add_all(clients)
             session.commit()
 
-            # Добавляем временные слоты на 10.04.2025
-            date_10 = datetime(2025, 4, 28).date()
-            time_slots_10 = [
-                # Слоты для владельца (Гадисов Ренат)
-                TimeSlot(
-                    id_category_service=categories[0].id,
-                    id_employer=owner.id,
-                    date=date_10,
-                    time_start=datetime.strptime("09:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[0].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[0].id,
-                    id_employer=owner.id,
-                    date=date_10,
-                    time_start=datetime.strptime("11:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[0].id
-                ),
+            # Создаем временные слоты для каждого специалиста на неделю вперед
+            today = datetime.now().date()
+            all_time_slots = []
+            
+            for day in range(7):  # 7 дней недели
+                current_date = today + timedelta(days=day)
+                weekday_num = current_date.weekday()  # 0-ПН, 6-ВС
+                weekday_name = WEEKDAYS[weekday_num]
                 
-                # Слоты для Сергеева Рината (Терапевт-ортопед)
-                TimeSlot(
-                    id_category_service=categories[1].id,
-                    id_employer=workers[0].id,
-                    date=date_10,
-                    time_start=datetime.strptime("10:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[1].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[1].id,
-                    id_employer=workers[0].id,
-                    date=date_10,
-                    time_start=datetime.strptime("13:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[1].id
-                ),
+                # Гадисов Ренат (ПТ-СБ 9:00-13:00)
+                if weekday_name in WORK_SCHEDULE["Гадисов Ренат Фамильевич"]["days"]:
+                    slots = generate_time_slots(
+                        "9:00", "13:00", 10,
+                        current_date, workers[0].id, categories[0].id
+                    )
+                    all_time_slots.extend(slots)
                 
-                # Слоты для Бареевой Светланы (Стоматолог-терапевт)
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[1].id,
-                    date=date_10,
-                    time_start=datetime.strptime("09:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[1].id,
-                    date=date_10,
-                    time_start=datetime.strptime("14:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
+                # Сергеев Ринат (ПН-СБ 9:00-19:00)
+                if weekday_name in WORK_SCHEDULE["Сергеев Ринат Леонидович"]["days"]:
+                    slots = generate_time_slots(
+                        "9:00", "19:00", 15,
+                        current_date, owner.id, categories[1].id
+                    )
+                    all_time_slots.extend(slots)
                 
-                # Слоты для Шариповой Альфии (Стоматолог-терапевт)
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[2].id,
-                    date=date_10,
-                    time_start=datetime.strptime("10:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[2].id,
-                    date=date_10,
-                    time_start=datetime.strptime("15:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                )
-            ]
+                # Бареева Светлана (ВТ-СР 9:00-14:00)
+                if weekday_name in WORK_SCHEDULE["Бареева Светлана Геннадьевна"]["days"]:
+                    slots = generate_time_slots(
+                        "9:00", "14:00", 15,
+                        current_date, workers[1].id, categories[2].id
+                    )
+                    all_time_slots.extend(slots)
+                
+                # Шарипова Альфия (СР-ЧТ 15:00-19:00)
+                if weekday_name in WORK_SCHEDULE["Шарипова Альфия Маратовна"]["days"]:
+                    slots = generate_time_slots(
+                        "15:00", "19:00", 15,
+                        current_date, workers[2].id, categories[2].id
+                    )
+                    all_time_slots.extend(slots)
 
-            # Добавляем временные слоты на 11.04.2025
-            date_11 = datetime(2025, 4, 29).date()
-            time_slots_11 = [
-                # Слоты для владельца (Гадисов Ренат)
-                TimeSlot(
-                    id_category_service=categories[0].id,
-                    id_employer=owner.id,
-                    date=date_11,
-                    time_start=datetime.strptime("10:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[0].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[0].id,
-                    id_employer=owner.id,
-                    date=date_11,
-                    time_start=datetime.strptime("12:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[0].id
-                ),
-                
-                # Слоты для Сергеева Рината (Терапевт-ортопед)
-                TimeSlot(
-                    id_category_service=categories[1].id,
-                    id_employer=workers[0].id,
-                    date=date_11,
-                    time_start=datetime.strptime("09:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[1].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[1].id,
-                    id_employer=workers[0].id,
-                    date=date_11,
-                    time_start=datetime.strptime("14:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[1].id
-                ),
-                
-                # Слоты для Бареевой Светланы (Стоматолог-терапевт)
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[1].id,
-                    date=date_11,
-                    time_start=datetime.strptime("11:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[1].id,
-                    date=date_11,
-                    time_start=datetime.strptime("16:00", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
-                
-                # Слоты для Шариповой Альфии (Стоматолог-терапевт)
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[2].id,
-                    date=date_11,
-                    time_start=datetime.strptime("10:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                ),
-                TimeSlot(
-                    id_category_service=categories[2].id,
-                    id_employer=workers[2].id,
-                    date=date_11,
-                    time_start=datetime.strptime("15:30", "%H:%M").time(),
-                    id_time_width_minutes_end=categories[2].id
-                )
-            ]
-
-            session.add_all(time_slots_10 + time_slots_11)
+            session.add_all(all_time_slots)
             session.commit()
 
             logger.info("Данные для стоматологической клиники успешно добавлены в базу данных")
