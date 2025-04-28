@@ -186,7 +186,7 @@ def initialize_db():
             session.commit()
 
             # Добавляем временные слоты на 10.04.2025
-            date_10 = datetime(2025, 4, 15).date()
+            date_10 = datetime(2025, 4, 28).date()
             time_slots_10 = [
                 # Слоты для владельца (Гадисов Ренат)
                 TimeSlot(
@@ -254,7 +254,7 @@ def initialize_db():
             ]
 
             # Добавляем временные слоты на 11.04.2025
-            date_11 = datetime(2025, 4, 16).date()
+            date_11 = datetime(2025, 4, 29).date()
             time_slots_11 = [
                 # Слоты для владельца (Гадисов Ренат)
                 TimeSlot(

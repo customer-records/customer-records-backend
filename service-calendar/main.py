@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
 from models import Base, CategoryService, TimeSlot, User, OnlineRegistration, Client, CompanyDescription  # Импорт всех моделей
+import httpx
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -145,6 +146,11 @@ def create_booking(booking: BookingRequest, db: Session = Depends(get_db)):
                 detail="This time slot is already booked"
             )
 
+        # Получаем информацию об услуге
+        service = db.query(CategoryService).filter(
+            CategoryService.id == time_slot.id_category_service
+        ).first()
+
         # Создаем новую запись бронирования
         new_booking = OnlineRegistration(
             id_client=booking.client_id,
@@ -157,6 +163,40 @@ def create_booking(booking: BookingRequest, db: Session = Depends(get_db)):
         db.add(new_booking)
         db.commit()
         db.refresh(new_booking)
+
+        # Формируем данные для отправки в телеграм-бот
+        booking_data = {
+            "client_name": f"{client.name} {client.last_name or ''}",
+            "phone": client.phone_number,
+            "appointment_date": str(time_slot.date),
+            "appointment_time": time_slot.time_start.strftime("%H:%M"),
+            "service_name": service.name_category if service else "Не указана",
+            "specialist_name": f"{employer.name} {employer.last_name}"
+        }
+
+        # Логируем детали записи
+        logger.info(
+            "Новая запись создана:\n"
+            f"Дата: {time_slot.date}\n"
+            f"Время: {time_slot.time_start}\n"
+            f"Клиент: {booking_data['client_name']} (тел.: {booking_data['phone']})\n"
+            f"Услуга: {booking_data['service_name']}\n"
+            f"Специалист: {booking_data['specialist_name']}"
+        )
+
+        # Отправляем данные в сервис телеграм-бота
+        try:
+            bot_service_url = f"http://{os.getenv('TELEGRAM_BOT_SERVICE')}/send-appointment"
+            with httpx.Client() as client:
+                response = client.post(
+                    bot_service_url,
+                    json=booking_data,
+                    timeout=5.0
+                )
+                if response.status_code != 200:
+                    logger.error(f"Ошибка отправки в телеграм-бот: {response.text}")
+        except Exception as e:
+            logger.error(f"Не удалось отправить данные в телеграм-бот: {str(e)}")
 
         return BookingResponse(
             booking_id=new_booking.id,
