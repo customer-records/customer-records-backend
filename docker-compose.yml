@@ -42,7 +42,7 @@ services:
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4000:4000"
+      - "4001:4001"
     depends_on:
       db:
         condition: service_healthy
