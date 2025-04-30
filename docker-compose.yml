@@ -151,7 +151,7 @@ services:
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7001:7001"
+      - "7005:7005"
     depends_on:
       test-db:
         condition: service_healthy
