@@ -1,161 +1,194 @@
+version: '3.8'
+
 services:
-  db:
+  test-db:
+    container_name: test-db
     image: postgres:13
     env_file:
-      - .env
+      - .env.test
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: test_${POSTGRES_DB}
     ports:
-      - "5438:5432"
+      - "5439:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - test_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d test_${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - test-network
 
-  database-init:
+  test-database-init:
+    container_name: test-database-init
     build: ./service-database
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
+    networks:
+      - test-network
 
-  gateway:
+  test-gateway:
+    container_name: test-gateway
     build: ./gateway
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4001:4001"
+      - "4002:4001"
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  auth:
+  test-auth:
+    container_name: test-auth
     build: ./service-auth
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  calendar:
+  test-calendar:
+    container_name: test-calendar
     build: ./service-calendar
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  telegram-bot:
+  test-telegram-bot:
+    container_name: test-telegram-bot
     build: ./service-telegram-bot
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  parser:
+  test-parser:
+    container_name: test-parser
     build: ./service-parser
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  telegram-code-sender:
+  test-telegram-code-sender:
+    container_name: test-telegram-code-sender
     build: ./service-telegram-code-sender
     env_file:
-      - .env
+      - .env.test
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_NAME: ${DB_NAME}
+      DB_HOST: test-db
+      DB_NAME: test_${DB_NAME}
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7000:7000"
+      - "7002:7000"
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
-  whatsapp-code-sender:
+  test-whatsapp-code-sender:
+    container_name: test-whatsapp-code-sender
     build: ./service-whatsapp-code-sender
     env_file:
-      - .env
+      - .env.test
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7001:7001"
+      - "7003:7001"
     volumes:
-      - whatsapp-session:/app/.wwebjs_auth
+      - test_whatsapp-session:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
-      database-init:
+      test-database-init:
         condition: service_completed_successfully
+    networks:
+      - test-network
 
 volumes:
-  postgres_data:
-  whatsapp-session:
+  test_postgres_data:
+  test_whatsapp-session:
+
+networks:
+  test-network:
+    name: test-network
