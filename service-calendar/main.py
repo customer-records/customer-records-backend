@@ -164,7 +164,6 @@ def create_booking(booking: BookingRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_booking)
 
-        # Формируем данные для отправки в телеграм-бот
         booking_data = {
             "client_name": f"{client.name} {client.last_name or ''}",
             "phone": client.phone_number,

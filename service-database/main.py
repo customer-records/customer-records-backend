@@ -240,11 +240,12 @@ def initialize_db():
             session.add_all(clients)
             session.commit()
 
-            # Создаем временные слоты для каждого специалиста на неделю вперед
+            # Создаем временные слоты для каждого специалиста на текущую неделю
             today = datetime.now().date()
             all_time_slots = []
             
-            for day in range(7):  # 7 дней недели
+            # Начинаем с сегодняшнего дня и добавляем слоты до конца недели
+            for day in range(7):
                 current_date = today + timedelta(days=day)
                 weekday_num = current_date.weekday()  # 0-ПН, 6-ВС
                 weekday_name = WEEKDAYS[weekday_num]
