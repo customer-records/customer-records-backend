@@ -12,6 +12,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from models import Base, CategoryService, TimeSlot, User, OnlineRegistration, Client, CompanyDescription  # Импорт всех моделей
 import httpx
+import pytz
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -267,8 +268,11 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
             ~TimeSlot.id.in_(booked_slot_ids)
         ]
 
+        # Подключаем московскую временную зону
+        moscow_tz = pytz.timezone("Europe/Moscow")
+        now = datetime.now(moscow_tz)
+
         # Если дата — сегодня, добавляем фильтрацию по текущему времени
-        now = datetime.now()
         if target_date == now.date():
             filters.append(TimeSlot.time_start > now.time())
 
