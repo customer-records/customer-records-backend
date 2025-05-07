@@ -241,7 +241,7 @@ def get_all_services(db: Session = Depends(get_db)):
 
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
-    """Получение всех доступных временных слотов на конкретную дату"""
+    """Получение всех доступных и актуальных временных слотов на конкретную дату"""
     try:
         logger.info(f"Запрос слотов на дату: {date}")
         
@@ -261,7 +261,17 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         ).all()
         booked_slot_ids = {slot.id_time_slot for slot in booked_slot_ids}
         
-        # Получаем только свободные слоты с информацией о специалистах и услугах
+        # Получаем только свободные и актуальные слоты
+        filters = [
+            TimeSlot.date == target_date,
+            ~TimeSlot.id.in_(booked_slot_ids)
+        ]
+
+        # Если дата — сегодня, добавляем фильтрацию по текущему времени
+        now = datetime.now()
+        if target_date == now.date():
+            filters.append(TimeSlot.time_start > now.time())
+
         slots = db.query(
             TimeSlot,
             CategoryService,
@@ -270,24 +280,16 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
             CategoryService, TimeSlot.id_category_service == CategoryService.id
         ).join(
             User, TimeSlot.id_employer == User.id
-        ).filter(
-            TimeSlot.date == target_date,
-            ~TimeSlot.id.in_(booked_slot_ids)  # Исключаем занятые слоты
-        ).all()
+        ).filter(*filters).all()
         
         logger.info(f"Найдено свободных слотов: {len(slots)}")
 
         result = []
-        for slot in slots:
-            time_slot, category_service, user = slot
-            
+        for time_slot, category_service, user in slots:
             time_start = time_slot.time_start
             duration = category_service.time_width_minutes_end
-            
-            # Вычисляем время окончания
-            time_end = (datetime.combine(datetime.min, time_start) + 
-                      timedelta(minutes=duration)).time()
-            
+            time_end = (datetime.combine(datetime.min, time_start) + timedelta(minutes=duration)).time()
+
             result.append(TimeSlotResponse(
                 id=time_slot.id,
                 date=time_slot.date.strftime("%Y-%m-%d"),
@@ -296,15 +298,16 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
                 service_name=category_service.name_category,
                 specialist_name=f"{user.name} {user.last_name}"
             ))
-        
+
         if not result:
             logger.info("Нет доступных слотов на указанную дату")
-        
+
         return result
 
     except Exception as e:
         logger.error(f"Ошибка при получении слотов: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
     
     
 @app.get("/specialists/", response_model=List[SpecialistResponse])
