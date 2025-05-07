@@ -253,11 +253,6 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
             logger.error(f"Ошибка формата даты: {ve}")
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
         
-        # Получаем текущее время на сервере
-        now = datetime.now()
-        current_time = now.time()
-        current_date = now.date()
-        
         # Получаем список занятых слотов на указанную дату
         booked_slot_ids = db.query(OnlineRegistration.id_time_slot).join(
             TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id
@@ -266,8 +261,8 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         ).all()
         booked_slot_ids = {slot.id_time_slot for slot in booked_slot_ids}
         
-        # Базовый запрос для свободных слотов
-        query = db.query(
+        # Получаем только свободные слоты с информацией о специалистах и услугах
+        slots = db.query(
             TimeSlot,
             CategoryService,
             User
@@ -278,14 +273,8 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         ).filter(
             TimeSlot.date == target_date,
             ~TimeSlot.id.in_(booked_slot_ids)  # Исключаем занятые слоты
-        )
+        ).all()
         
-        # Если запрашивается сегодняшняя дата, добавляем фильтр по времени
-        if target_date == current_date:
-            query = query.filter(TimeSlot.time_start >= current_time)
-            logger.info(f"Применена фильтрация по текущему времени: {current_time}")
-        
-        slots = query.all()
         logger.info(f"Найдено свободных слотов: {len(slots)}")
 
         result = []
@@ -305,7 +294,7 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
                 time_start=time_start.strftime("%H:%M"),
                 time_end=time_end.strftime("%H:%M"),
                 service_name=category_service.name_category,
-                specialis_name=f"{user.name} {user.last_name}"
+                specialist_name=f"{user.name} {user.last_name}"
             ))
         
         if not result:
