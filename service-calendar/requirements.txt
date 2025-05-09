@@ -7,3 +7,5 @@ alembic
 bcrypt
 httpx
 pytz
+icalendar
+ics

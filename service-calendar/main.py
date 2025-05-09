@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import OperationalError, IntegrityError
 from dotenv import load_dotenv
+from fastapi import Response
 import os
 import time
 from datetime import datetime, timedelta
@@ -12,8 +13,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from models import Base, CategoryService, TimeSlot, User, OnlineRegistration, Client, CompanyDescription  # Импорт всех моделей
 import httpx
-import pytz
-
+from ics import Calendar, Event
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,49 +110,42 @@ def wait_for_db(engine, retries=5, delay=5):
 
 wait_for_db(engine)
 
-@app.post("/bookings/", response_model=BookingResponse)
+@app.post("/bookings/", response_class=Response)
 def create_booking(booking: BookingRequest, db: Session = Depends(get_db)):
     """
-    Создание бронирования временного слота
+    Создание бронирования временного слота, генерация ICS-файла и отправка уведомлений
     """
     try:
-        # Проверяем существование временного слота
+        # 1. Проверяем существование слота, клиента, компании и специалиста
         time_slot = db.query(TimeSlot).filter(TimeSlot.id == booking.time_slot_id).first()
         if not time_slot:
             raise HTTPException(status_code=404, detail="Time slot not found")
 
-        # Проверяем существование клиента
         client = db.query(Client).filter(Client.id == booking.client_id).first()
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
 
-        # Проверяем существование компании
         company = db.query(CompanyDescription).filter(CompanyDescription.id == booking.company_id).first()
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
 
-        # Проверяем существование сотрудника
         employer = db.query(User).filter(User.id == booking.employer_id).first()
         if not employer:
             raise HTTPException(status_code=404, detail="Employer not found")
 
-        # Проверяем, не занят ли уже этот слот
+        # 2. Проверяем, что слот ещё не забронирован
         existing_booking = db.query(OnlineRegistration).filter(
             OnlineRegistration.id_time_slot == booking.time_slot_id
         ).first()
-        
         if existing_booking:
-            raise HTTPException(
-                status_code=400,
-                detail="This time slot is already booked"
-            )
+            raise HTTPException(status_code=400, detail="This time slot is already booked")
 
-        # Получаем информацию об услуге
+        # 3. Получаем информацию об услуге
         service = db.query(CategoryService).filter(
             CategoryService.id == time_slot.id_category_service
         ).first()
 
-        # Создаем новую запись бронирования
+        # 4. Создаём запись в базе
         new_booking = OnlineRegistration(
             id_client=booking.client_id,
             id_employer=booking.employer_id,
@@ -160,68 +153,88 @@ def create_booking(booking: BookingRequest, db: Session = Depends(get_db)):
             id_adress_company=booking.company_id,
             date_time_create=datetime.utcnow()
         )
-
         db.add(new_booking)
         db.commit()
         db.refresh(new_booking)
 
+        # 5. Подготавливаем данные для уведомлений
         booking_data = {
             "client_name": f"{client.name} {client.last_name or ''}",
             "phone": client.phone_number,
-            "appointment_date": str(time_slot.date),
+            "appointment_date": time_slot.date.strftime("%d.%m.%Y"),
             "appointment_time": time_slot.time_start.strftime("%H:%M"),
             "service_name": service.name_category if service else "Не указана",
             "specialist_name": f"{employer.name} {employer.last_name}"
         }
 
-        # Логируем детали записи
         logger.info(
             "Новая запись создана:\n"
-            f"Дата: {time_slot.date}\n"
-            f"Время: {time_slot.time_start}\n"
-            f"Клиент: {booking_data['client_name']} (тел.: {booking_data['phone']})\n"
-            f"Услуга: {booking_data['service_name']}\n"
-            f"Специалист: {booking_data['specialist_name']}"
+            f"  Дата: {time_slot.date}\n"
+            f"  Время: {time_slot.time_start}\n"
+            f"  Клиент: {booking_data['client_name']} (тел.: {booking_data['phone']})\n"
+            f"  Услуга: {booking_data['service_name']}\n"
+            f"  Специалист: {booking_data['specialist_name']}"
         )
 
-        # Отправляем данные в сервис телеграм-бота
+        # 6. Отправка в телеграм-бот (если настроено)
         try:
             bot_service_url = f"http://{os.getenv('TELEGRAM_BOT_SERVICE')}/send-appointment"
-            with httpx.Client() as client:
-                response = client.post(
-                    bot_service_url,
-                    json=booking_data,
-                    timeout=5.0
-                )
-                if response.status_code != 200:
-                    logger.error(f"Ошибка отправки в телеграм-бот: {response.text}")
+            with httpx.Client(timeout=5.0) as client_http:
+                resp = client_http.post(bot_service_url, json=booking_data)
+                if resp.status_code != 200:
+                    logger.error(f"Ошибка отправки в телеграм-бот: {resp.text}")
         except Exception as e:
-            logger.error(f"Не удалось отправить данные в телеграм-бот: {str(e)}")
+            logger.error(f"Не удалось отправить данные в телеграм-бот: {e}")
 
-        return BookingResponse(
-            booking_id=new_booking.id,
-            time_slot_id=new_booking.id_time_slot,
-            client_id=new_booking.id_client,
-            company_id=new_booking.id_adress_company,
-            employer_id=new_booking.id_employer,
-            date_time_create=new_booking.date_time_create,
-            status="success"
+        # 7. Отправка WhatsApp-уведомления
+        try:
+            whatsapp_url = os.getenv("WHATSAPP_SERVICE_URL")  # например "http://localhost:7001"
+            with httpx.Client(timeout=5.0) as client_http:
+                resp = client_http.post(
+                    f"http://{whatsapp_url}/send-notification",
+                    json=booking_data
+                )
+                if resp.status_code != 200:
+                    logger.error(f"WhatsApp notification failed: {resp.text}")
+        except Exception as e:
+            logger.error(f"Error when sending WhatsApp notification: {e}")
+
+        # 8. Генерация ICS-файла
+        start_dt = datetime.combine(time_slot.date, time_slot.time_start)
+        end_dt = start_dt + timedelta(minutes=service.time_width_minutes_end)
+        calendar = Calendar()
+        event = Event()
+        event.name = f"Запись на приём: {service.name_category}"
+        event.begin = start_dt
+        event.end = end_dt
+        event.description = (
+            f"Клиент: {client.name} {client.last_name or ''}\n"
+            f"Специалист: {employer.name} {employer.last_name}\n"
+            f"Услуга: {service.name_category}"
         )
+        event.location = (
+            f"{company.company_adress_city}, "
+            f"{company.company_adress_street} {company.company_adress_house_number}"
+        )
+        calendar.events.add(event)
+        ics_content = str(calendar)
+
+        headers = {
+            "Content-Disposition": f"attachment; filename=appointment_{new_booking.id}.ics",
+            "Content-Type": "text/calendar"
+        }
+        return Response(content=ics_content, media_type="text/calendar", headers=headers)
 
     except IntegrityError as e:
         db.rollback()
         logger.error(f"Ошибка целостности данных при бронировании: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail="Data integrity error occurred while creating booking"
-        )
+        raise HTTPException(status_code=400, detail="Data integrity error occurred while creating booking")
+
     except Exception as e:
         db.rollback()
         logger.error(f"Ошибка при создании бронирования: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error occurred while creating booking"
-        )
+        raise HTTPException(status_code=500, detail="Internal server error occurred while creating booking")
+
 
 @app.get("/services/", response_model=List[ServiceResponse])
 def get_all_services(db: Session = Depends(get_db)):
@@ -239,72 +252,65 @@ def get_all_services(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Ошибка при получении списка услуг: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+from zoneinfo import ZoneInfo
 
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
-    """Получение всех доступных и актуальных временных слотов на конкретную дату"""
+    """Получение всех доступных и актуальных временных слотов на конкретную дату (по московскому времени)"""
     try:
         logger.info(f"Запрос слотов на дату: {date}")
-        
+
+        # Устанавливаем московский часовой пояс
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        now_moscow = datetime.now(tz=moscow_tz)
+        logger.info(f"Текущее московское время: {now_moscow.isoformat()}")
+
         # Парсим дату из строки
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d").date()
-            logger.info(f"Дата успешно преобразована: {target_date}")
-        except ValueError as ve:
-            logger.error(f"Ошибка формата даты: {ve}")
+        except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-        
-        # Получаем список занятых слотов на указанную дату
+
+        # Получаем список занятых слотов
         booked_slot_ids = db.query(OnlineRegistration.id_time_slot).join(
             TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id
-        ).filter(
-            TimeSlot.date == target_date
-        ).all()
+        ).filter(TimeSlot.date == target_date).all()
         booked_slot_ids = {slot.id_time_slot for slot in booked_slot_ids}
-        
-        # Получаем только свободные и актуальные слоты
+
+        # Фильтры для слотов
         filters = [
             TimeSlot.date == target_date,
             ~TimeSlot.id.in_(booked_slot_ids)
         ]
 
-        # Подключаем московскую временную зону
-        moscow_tz = pytz.timezone("Europe/Moscow")
-        now = datetime.now(moscow_tz)
+        # Исключаем прошедшие слоты, если сегодня
+        if target_date == now_moscow.date():
+            filters.append(TimeSlot.time_start > now_moscow.time())
 
-        # Если дата — сегодня, добавляем фильтрацию по текущему времени
-        if target_date == now.date():
-            filters.append(TimeSlot.time_start > now.time())
-
-        slots = db.query(
-            TimeSlot,
-            CategoryService,
-            User
-        ).join(
+        slots = db.query(TimeSlot, CategoryService, User).join(
             CategoryService, TimeSlot.id_category_service == CategoryService.id
         ).join(
             User, TimeSlot.id_employer == User.id
         ).filter(*filters).all()
-        
-        logger.info(f"Найдено свободных слотов: {len(slots)}")
 
         result = []
         for time_slot, category_service, user in slots:
-            time_start = time_slot.time_start
+            time_start = time_slot.time_start.strftime("%H:%M")
             duration = category_service.time_width_minutes_end
-            time_end = (datetime.combine(datetime.min, time_start) + timedelta(minutes=duration)).time()
+            time_end = (
+                datetime.combine(datetime.min, time_slot.time_start) +
+                timedelta(minutes=duration)
+            ).time().strftime("%H:%M")
 
             result.append(TimeSlotResponse(
                 id=time_slot.id,
                 date=time_slot.date.strftime("%Y-%m-%d"),
-                time_start=time_start.strftime("%H:%M"),
-                time_end=time_end.strftime("%H:%M"),
+                time_start=time_start,
+                time_end=time_end,
                 service_name=category_service.name_category,
                 specialist_name=f"{user.name} {user.last_name}"
             ))
-
-        if not result:
-            logger.info("Нет доступных слотов на указанную дату")
 
         return result
 
@@ -312,7 +318,6 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         logger.error(f"Ошибка при получении слотов: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    
     
 @app.get("/specialists/", response_model=List[SpecialistResponse])
 def get_all_specialists(category_id: Optional[int] = None, db: Session = Depends(get_db)):

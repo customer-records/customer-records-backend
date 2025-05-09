@@ -233,6 +233,63 @@ app.delete('/clear-code/:code', async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Failed to clear code' });
   }
 });
+// Отправка напоминания о записи
+app.post('/send-notification', async (req, res) => {
+  const {
+    phone,              // <-- был phone_number, теперь phone
+    client_name,
+    appointment_date,
+    appointment_time,
+    service_name,
+    specialist_name
+  } = req.body;
+
+  // Валидация 
+  if (!phone) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Missing required field: phone'
+    });
+  }
+  if (!client_name || !appointment_date || !appointment_time) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Missing one of: client_name, appointment_date, appointment_time'
+    });
+  }
+
+  if (!whatsappClient.info) {
+    return res.status(503).json({
+      status: 'error',
+      message: 'WhatsApp client not ready'
+    });
+  }
+
+  // Нормализуем и формируем JID
+  const cleanPhone = phone.replace(/\D/g, '');
+  const whatsappNumber = `${cleanPhone}@c.us`;
+
+  // Строим текст уведомления
+  const message =
+    `Здравствуйте, ${client_name}!\n` +
+    `Напоминаем о вашей записи на услугу: *${service_name}*.\n` +
+    `Специалист: *${specialist_name}*.\n` +
+    `Дата: *${appointment_date}*, время: *${appointment_time}*.\n` +
+    `Ждём вас! 😊`;
+
+  try {
+    await whatsappClient.sendMessage(whatsappNumber, message);
+    console.log(`Напоминание успешно отправлено на ${cleanPhone}`);
+    return res.json({ status: 'success' });
+  } catch (err) {
+    console.error('Ошибка при отправке уведомления:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to send notification'
+    });
+  }
+});
+
 
 // Запуск сервера
 const PORT = process.env.PORT || 7001;
