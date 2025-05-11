@@ -1,22 +1,26 @@
+version: '3.8'
+
 services:
+  # Test DB (порт внешнего хоста отличается от основного)
   db:
     image: postgres:13
     env_file:
-      - .env
+      - .env             # или .env.test, если хотите отдельные креденшелы
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5438:5432"
+      - "5439:5432"       # тестовый порт 5439 вместо 5438
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_test:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  # Инициализация схемы
   database-init:
     build: ./service-database
     env_file:
@@ -31,6 +35,7 @@ services:
       db:
         condition: service_healthy
 
+  # Test Gateway
   gateway:
     build: ./gateway
     env_file:
@@ -42,13 +47,12 @@ services:
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4000:4000"
+      - "4001:4000"       # внешний 4001 → внутренний 4000
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db
+      - database-init
 
+  # Test Auth
   auth:
     build: ./service-auth
     env_file:
@@ -60,13 +64,12 @@ services:
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db
+      - database-init
 
+  # Test Calendar
   calendar:
     build: ./service-calendar
     env_file:
@@ -77,32 +80,27 @@ services:
       DB_HOST: db
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot:5000"  
+      TELEGRAM_BOT_SERVICE: "telegram-bot:5001"
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db
+      - database-init
 
+  # Test Telegram Bot
   telegram-bot:
     build: ./service-telegram-bot
     env_file:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar:8000"  
+      SERVICE_CALENDAR_URL: "calendar:8001"
     ports:
-      - "5000:5000"
+      - "5001:5000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
-      calendar:  
-        condition: service_started
+      - calendar
 
+  # Test Telegram Code Sender
   telegram-code-sender:
     build: ./service-telegram-code-sender
     env_file:
@@ -115,13 +113,12 @@ services:
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7000:7000"
+      - "7002:7000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db
+      - database-init
 
+  # Test WhatsApp Code Sender
   whatsapp-code-sender:
     build: ./service-whatsapp-code-sender
     env_file:
@@ -129,19 +126,17 @@ services:
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7001:7001"
+      - "7003:7001"
     volumes:
-      - whatsapp-session:/app/.wwebjs_auth
+      - whatsapp-session-test:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db
+      - database-init
 
 volumes:
-  postgres_data:
-  whatsapp-session:
+  postgres_data_test:
+  whatsapp-session-test:
