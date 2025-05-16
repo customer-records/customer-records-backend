@@ -1,8 +1,8 @@
 version: "3.8"
 
 services:
-  # Тестовая база
-  db:
+  # Тестовая база — свой порт и том
+  db_test:
     image: postgres:13
     env_file:
       - .env
@@ -11,147 +11,131 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5438:5432"
+      - "5439:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_test:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # Инициализация схемы тестовой базы
-  database-init:
+  database-init-test:
     build: ./service-database
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db:
+      db_test:
         condition: service_healthy
 
-  # Gateway
-  gateway:
+  # Gateway теста — смещённый хост-порт 4002
+  gateway_test:
     build: ./gateway
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4000:4000"
+      - "4002:4000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_test
+      - database-init-test
 
-  # Auth
-  auth:
+  # Auth теста — хост-порт 3002
+  auth_test:
     build: ./service-auth
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3000:3000"
+      - "3002:3000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_test
+      - database-init-test
 
-  # Calendar
-  calendar:
+  # Calendar теста — порт 8002
+  calendar_test:
     build: ./service-calendar
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot:5000"
+      TELEGRAM_BOT_SERVICE: "telegram-bot-test:5003"
     ports:
-      - "8000:8000"
+      - "8002:8000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_test
+      - database-init-test
 
-  # Telegram Bot
-  telegram-bot:
+  # Telegram Bot теста — порт 5003
+  telegram-bot-test:
     build: ./service-telegram-bot
     env_file:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar:8000"
+      SERVICE_CALENDAR_URL: "calendar_test:8002"
     ports:
-      - "5000:5000"
+      - "5003:5000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
-      calendar:
-        condition: service_started
+      - calendar_test
 
-  # Telegram Code Sender
-  telegram-code-sender:
+  # Telegram Code Sender теста — порт 7004
+  telegram-code-sender-test:
     build: ./service-telegram-code-sender
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7000:7000"
+      - "7004:7000"
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_test
+      - database-init-test
 
-  # WhatsApp Code Sender
-  whatsapp-code-sender:
+  # WhatsApp Code Sender теста — порт 7005
+  whatsapp-code-sender-test:
     build: ./service-whatsapp-code-sender
     env_file:
       - .env
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7001:7001"
+      - "7005:7001"
     volumes:
-      - whatsapp-session:/app/.wwebjs_auth
+      - whatsapp-session-test:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_test
+      - database-init-test
 
 volumes:
-  postgres_data:
-  whatsapp-session:
+  postgres_data_test:
+  whatsapp-session-test:
