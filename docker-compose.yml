@@ -79,7 +79,8 @@ services:
       DB_HOST: db_test
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot-test:5003"
+      TELEGRAM_BOT_SERVICE: "telegram-bot-test:5000"
+      WHATSAPP_SERVICE_URL: "whatsapp-code-sender-test:7001"
     ports:
       - "8002:8000"
     depends_on:
@@ -93,7 +94,7 @@ services:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar_test:8002"
+      SERVICE_CALENDAR_URL: "calendar_test:8000"
     ports:
       - "5003:5000"
     depends_on:
