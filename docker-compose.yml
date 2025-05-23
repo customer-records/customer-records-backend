@@ -1,8 +1,8 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  # Тестовая база
-  db_test:
+  # База данных для hookah-версии
+  db_hookah:
     image: postgres:13
     env_file:
       - .env
@@ -11,132 +11,133 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5439:5432"
+      - "5440:5432"
     volumes:
-      - postgres_data_test:/var/lib/postgresql/data
+      - postgres_data_hookah:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # Инициализация схемы тестовой базы
-  database-init-test:
+  # Инициализация схемы для hookah-базы
+  database-init-hookah:
     build: ./service-database
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_test
+      DB_HOST: db_hookah
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db_test:
+      db_hookah:
         condition: service_healthy
 
-  # Тестовый Gateway
-  gateway_test:
+  # Gateway hookah
+  gateway_hookah:
     build: ./gateway
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_test
+      DB_HOST: db_hookah
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4001:4000"
+      - "4004:4000"
     depends_on:
-      - db_test
-      - database-init-test
+      - db_hookah
+      - database-init-hookah
 
-  # Тестовый Auth
-  auth_test:
+  # Auth hookah
+  auth_hookah:
     build: ./service-auth
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_test
+      DB_HOST: db_hookah
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3001:3000"
+      - "3004:3000"
     depends_on:
-      - db_test
-      - database-init-test
+      - db_hookah
+      - database-init-hookah
 
-  # Тестовый Calendar
-  calendar_test:
+  # Calendar hookah
+  calendar_hookah:
     build: ./service-calendar
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_test
+      DB_HOST: db_hookah
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot-test:5001"
+      TELEGRAM_BOT_SERVICE: "telegram-bot-hookah:5000"
+      WHATSAPP_SERVICE_URL: "whatsapp-code-sender-hookah:7001"
     ports:
-      - "8001:8000"
+      - "8004:8000"
     depends_on:
-      - db_test
-      - database-init-test
+      - db_hookah
+      - database-init-hookah
 
-  # Тестовый Telegram Bot
-  telegram-bot-test:
+  # Telegram Bot hookah
+  telegram-bot-hookah:
     build: ./service-telegram-bot
     env_file:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar_test:8001"
+      SERVICE_CALENDAR_URL: "calendar_hookah:8000"
     ports:
-      - "5001:5000"
+      - "5004:5000"
     depends_on:
-      - calendar_test
+      - calendar_hookah
 
-  # Тестовый Telegram Code Sender
-  telegram-code-sender-test:
+  # Telegram Code Sender hookah
+  telegram-code-sender-hookah:
     build: ./service-telegram-code-sender
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_test
+      DB_HOST: db_hookah
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7002:7000"
+      - "7006:7000"
     depends_on:
-      - db_test
-      - database-init-test
+      - db_hookah
+      - database-init-hookah
 
-  # Тестовый WhatsApp Code Sender
-  whatsapp-code-sender-test:
+  # WhatsApp Code Sender hookah
+  whatsapp-code-sender-hookah:
     build: ./service-whatsapp-code-sender
     env_file:
       - .env
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7003:7001"
+      - "7007:7001"
     volumes:
-      - whatsapp-session-test:/app/.wwebjs_auth
+      - whatsapp-session-hookah:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      - db_test
-      - database-init-test
+      - db_hookah
+      - database-init-hookah
 
 volumes:
-  postgres_data_test:
-  whatsapp-session-test:
+  postgres_data_hookah:
+  whatsapp-session-hookah:
