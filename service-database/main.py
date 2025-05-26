@@ -5,9 +5,9 @@ from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
 import os
 import time
+from datetime import datetime, date, time as dt_time, timedelta
+from models import Base, CategoryService, CompanyDescription, User, TimeSlot
 import bcrypt
-from datetime import datetime, time as dt_time, timedelta
-from models import Base, User, CategoryService, TimeSlot, Client, OnlineRegistration, CompanyDescription
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -16,282 +16,148 @@ logger = logging.getLogger(__name__)
 # Загружаем переменные окружения
 load_dotenv()
 
-# Настройка базы данных
-DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
-logger.info(f"Подключение к базе данных по URL: {DATABASE_URL}")
+# URL базы данных
+DATABASE_URL = (
+    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+    f"@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+)
 engine = create_engine(DATABASE_URL)
 
-# График работы специалистов
-WORK_SCHEDULE = {
-    "Гадисов Ренат Фамильевич": {
-        "days": ["ПТ", "СБ"],
-        "hours": ("9:00", "13:00"),
-        "duration": 10
-    },
-    "Сергеев Ринат Леонидович": {
-        "days": ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"],
-        "hours": ("9:00", "19:00"),
-        "duration": 15
-    },
-    "Бареева Светлана Геннадьевна": {
-        "days": ["ВТ", "СР"],
-        "hours": ("9:00", "14:00"),
-        "duration": 15
-    },
-    "Шарипова Альфия Маратовна": {
-        "days": ["СР", "ЧТ"],
-        "hours": ("15:00", "19:00"),
-        "duration": 15
-    }
-}
-
-# Соответствие номеров дней недели и их обозначений
-WEEKDAYS = {
-    0: "ПН",
-    1: "ВТ",
-    2: "СР",
-    3: "ЧТ",
-    4: "ПТ",
-    5: "СБ",
-    6: "ВС"
-}
-
-# Ожидание подключения к базе данных
-def wait_for_db(engine, retries=5, delay=5):
-    for i in range(retries):
+# Ожидание подключения к БД
+def wait_for_db(engine, retries=5, delay_seconds=5):
+    for attempt in range(retries):
         try:
-            with engine.connect() as connection:
-                logger.info("Подключение к базе данных успешно!")
-                return True
+            with engine.connect():
+                logger.info("Подключение к БД успешно!")
+                return
         except OperationalError as e:
-            logger.error(f"Попытка {i + 1}/{retries}: Не удалось подключиться к базе данных. Ошибка: {e}")
-            time.sleep(delay)
-    raise Exception("Не удалось подключиться к базе данных после нескольких попыток.")
+            logger.error(f"Попытка {attempt+1}/{retries}: ошибка: {e}")
+            time.sleep(delay_seconds)
+    raise RuntimeError("Не удалось подключиться к БД")
 
-def generate_time_slots(start_time_str, end_time_str, duration_minutes, date, worker_id, category_id):
+# Генерация слотов с учётом перехода через полночь
+def generate_time_slots(start: dt_time, end: dt_time, duration_min: int,
+                        slot_date: date, emp_id: int, cat_id: int):
     slots = []
-    start_time = datetime.strptime(start_time_str, "%H:%M").time()
-    end_time = datetime.strptime(end_time_str, "%H:%M").time()
-    
-    current_time = datetime.combine(date, start_time)
-    end_datetime = datetime.combine(date, end_time)
-    
-    while current_time + timedelta(minutes=duration_minutes) <= end_datetime:
+    start_dt = datetime.combine(slot_date, start)
+    end_dt = datetime.combine(slot_date, end)
+    if end <= start:
+        end_dt += timedelta(days=1)
+    curr = start_dt
+    while curr + timedelta(minutes=duration_min) <= end_dt:
         slots.append(TimeSlot(
-            id_category_service=category_id,
-            id_employer=worker_id,
-            date=date,
-            time_start=current_time.time(),
-            id_time_width_minutes_end=category_id
+            id_category_service=cat_id,
+            id_employer=emp_id,
+            date=slot_date,
+            time_start=curr.time(),
+            id_time_width_minutes_end=cat_id
         ))
-        current_time += timedelta(minutes=duration_minutes)
-    
+        curr += timedelta(minutes=duration_min)
     return slots
 
+# Инициализация данных для кальянной
+
 def initialize_db():
-    # Ожидаем доступность БД
     wait_for_db(engine)
-    
-    # Создаем таблицы
-    Base.metadata.create_all(bind=engine)
-    logger.info("Таблицы созданы успешно!")
-    
+    Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
-
     try:
-        # Проверяем, есть ли уже данные в базе
-        if not session.query(User).first():
-            # Добавляем категории услуг с массивами услуг
-            categories = [
-                CategoryService(
-                    name_category="Хирург имплантолог",
-                    time_width_minutes_end=10,
-                    services_array=[
-                        "Консультация хирурга имплантация/удаление",
-                    ]
-                ),
-                CategoryService(
-                    name_category="Терапевт-ортопед",
-                    time_width_minutes_end=15,
-                    services_array=[
-                        "Первичная консультация терапевта​",
-                    ]
-                ),
-                CategoryService(
-                    name_category="Стоматолог-терапевт",
-                    time_width_minutes_end=15,
-                    services_array=[
-                        "Первичная консультация терапевта​",
-                    ]
-                )
-            ]
-            session.add_all(categories)
-            session.commit()
-
-            # Добавляем стоматологическую клинику
-            company = CompanyDescription(
-                company_name="Denta Rell",
-                company_description="Современная стоматологическая клиника с высококвалифицированными специалистами",
-                company_adress_country="Россия",
-                company_adress_city="Казань",
-                company_adress_street="Проспект Победы",
-                company_adress_house_number="35 Б",
-                company_adress_house_number_index="420000",
-                time_work_start=datetime.strptime("09:00", "%H:%M").time(),
-                time_work_end=datetime.strptime("19:00", "%H:%M").time(),
-                weekdays_work_1=True,
-                weekdays_work_2=True,
-                weekdays_work_3=True,
-                weekdays_work_4=True,
-                weekdays_work_5=True,
-                weekdays_work_6=True,
-                weekdays_work_7=False
+        # 1. Категории услуг (каждая услуга — отдельная запись)
+        service_names = [
+            "Столик для двоих",
+            "Столик от 4 до 6 гостей",
+            "Столик от 4 до 6 гостей с Xbox",
+            "Столик от 4 до 6 гостей с PlayStation",
+            "VIP комната от 4 до 6 гостей"
+        ]
+        categories = []
+        for name in service_names:
+            cat = CategoryService(
+                name_category=name,
+                time_width_minutes_end=120,
+                services_array=[name]
             )
-            session.add(company)
-            session.commit()
+            categories.append(cat)
+        session.add_all(categories)
+        session.commit()
+        logger.info("Категории услуг добавлены: %s", [c.id for c in categories])
 
-            # Хэшируем пароль для владельца
-            salt = bcrypt.gensalt()
-            hashed_password = bcrypt.hashpw("owner123".encode('utf-8'), salt)
+        # 2. Информация о компании
+        company = CompanyDescription(
+            company_name="Beerloga",
+            company_description="Уютная кальянная с авторскими смесями и гостеприимной атмосферой",
+            company_adress_country="Россия",
+            company_adress_city="Казань",
+            company_adress_street="Мавлютого",
+            company_adress_house_number="46",
+            company_adress_house_number_index="000000",
+            time_work_start=dt_time(14, 0),
+            time_work_end=dt_time(2, 0),
+            weekdays_work_1=True,
+            weekdays_work_2=True,
+            weekdays_work_3=True,
+            weekdays_work_4=True,
+            weekdays_work_5=True,
+            weekdays_work_6=True,
+            weekdays_work_7=True
+        )
+        session.add(company)
+        session.commit()
+        logger.info("Информация о компании добавлена: %s", company.id)
 
-            # Добавляем владельца (Гадисов Ренат Фамильевич)
-            owner = User(
+        # 3. Добавляем специалистов-кальянщиков и генерируем слоты для каждой услуги
+        salt = bcrypt.gensalt()
+        slots = []
+        # дни работы специалистов
+        sergey_days = {0, 2, 4, 6}  # Пн, Ср, Пт, Вс
+        nikita_days = {1, 3, 5}     # Вт, Чт, Сб
+        for cat in categories:
+            # создаем Сергея для этой услуги
+            sergey = User(
                 role="owner",
-                email="renat@dentapro.ru",
-                password=hashed_password.decode('utf-8'),
-                name="Ринат",
-                last_name="Сергеев",
-                sur_name="Леонидович",
-                phone_number="79172759797",
-                id_category_service=categories[1].id,  # Хирург имплантолог
-                google_api_key="dentapro_api_key",
-                google_client_id="dentapro_client_id",
-                google_calendar_id="dentapro_calendar_id",
-                chat_id="100000001",
-                tg_name="dr_gadisov"
+                email=f"sergey_{cat.id}@beerloga.ru",
+                password=bcrypt.hashpw(f"sergeypass{cat.id}".encode(), salt).decode(),
+                name="Кальянщик",
+                last_name="Сергей",
+                phone_number="79000000001",
+                id_category_service=cat.id,
+                chat_id="300000001",
+                tg_name=f"hookah_sergey_{cat.id}"
             )
-            session.add(owner)
-            session.commit()
+            # создаем Никиту для этой услуги
+            nikita = User(
+                role="worker",
+                email=f"nikita_{cat.id}@beerloga.ru",
+                password=bcrypt.hashpw(f"nikitapass{cat.id}".encode(), salt).decode(),
+                name="Кальянщик",
+                last_name="Никита",
+                phone_number="79000000002",
+                id_category_service=cat.id,
+                chat_id="300000002",
+                tg_name=f"hookah_nikita_{cat.id}"
+            )
+            session.add_all([sergey, nikita])
+            session.flush()  # чтобы получить ID
+            # генерация слотов для Сергея
+            today = date.today()
+            for delta in range(7):
+                d = today + timedelta(days=delta)
+                if d.weekday() in sergey_days:
+                    slots.extend(generate_time_slots(dt_time(16,30), dt_time(2,0), 120, d, sergey.id, cat.id))
+                if d.weekday() in nikita_days:
+                    slots.extend(generate_time_slots(dt_time(16,30), dt_time(2,0), 120, d, nikita.id, cat.id))
+        session.commit()
+        session.add_all(slots)
+        session.commit()
+        logger.info("Специалисты и слоты добавлены для каждой услуги")
 
-            # Добавляем работников
-            workers = [
-                User(
-                    role="worker",
-                    email="rinat@dentapro.ru",
-                    password=bcrypt.hashpw("doctor1pass".encode('utf-8'), salt).decode('utf-8'),
-                    name="Ренат",
-                    last_name="Гадисов",
-                    sur_name="Фамильевич",
-                    phone_number="79274770444",
-                    id_category_service=categories[0].id,  # Терапевт-ортопед
-                    chat_id="100000002",
-                    tg_name="dr_sergeev"
-                ),
-                User(
-                    role="worker",
-                    email="svetlana@dentapro.ru",
-                    password=bcrypt.hashpw("doctor2pass".encode('utf-8'), salt).decode('utf-8'),
-                    name="Светлана",
-                    last_name="Бареева",
-                    sur_name="Геннадьевна",
-                    phone_number="79872954242",
-                    id_category_service=categories[2].id,  # Стоматолог-терапевт
-                    chat_id="100000003",
-                    tg_name="dr_bareeva"
-                ),
-                User(
-                    role="worker",
-                    email="alfiya@dentapro.ru",
-                    password=bcrypt.hashpw("doctor3pass".encode('utf-8'), salt).decode('utf-8'),
-                    name="Альфия",
-                    last_name="Шарипова",
-                    sur_name="Маратовна",
-                    phone_number="79969029242",
-                    id_category_service=categories[2].id,  # Стоматолог-терапевт
-                    chat_id="100000004",
-                    tg_name="dr_sharipova"
-                )
-            ]
-            session.add_all(workers)
-            session.commit()
-
-            # Добавляем клиентов
-            clients = [
-                Client(
-                    email="client1@example.com",
-                    password=bcrypt.hashpw("clientpass1".encode('utf-8'), salt).decode('utf-8'),
-                    name="Иван",
-                    last_name="Иванов",
-                    phone_number="79111111111",
-                    tg_name="ivan_ivanov",
-                    chat_id="200000001"
-                ),
-                Client(
-                    email="client2@example.com",
-                    password=bcrypt.hashpw("clientpass2".encode('utf-8'), salt).decode('utf-8'),
-                    name="Елена",
-                    last_name="Петрова",
-                    phone_number="79222222222",
-                    tg_name="elena_petrova",
-                    chat_id="200000002"
-                )
-            ]
-            session.add_all(clients)
-            session.commit()
-
-            # Создаем временные слоты для каждого специалиста на текущую неделю
-            today = datetime.now().date()
-            all_time_slots = []
-            
-            # Начинаем с сегодняшнего дня и добавляем слоты до конца недели
-            for day in range(7):
-                current_date = today + timedelta(days=day)
-                weekday_num = current_date.weekday()  # 0-ПН, 6-ВС
-                weekday_name = WEEKDAYS[weekday_num]
-                
-                # Гадисов Ренат (ПТ-СБ 9:00-13:00)
-                if weekday_name in WORK_SCHEDULE["Гадисов Ренат Фамильевич"]["days"]:
-                    slots = generate_time_slots(
-                        "9:00", "13:00", 10,
-                        current_date, workers[0].id, categories[0].id
-                    )
-                    all_time_slots.extend(slots)
-                
-                # Сергеев Ринат (ПН-СБ 9:00-19:00)
-                if weekday_name in WORK_SCHEDULE["Сергеев Ринат Леонидович"]["days"]:
-                    slots = generate_time_slots(
-                        "9:00", "19:00", 15,
-                        current_date, owner.id, categories[1].id
-                    )
-                    all_time_slots.extend(slots)
-                
-                # Бареева Светлана (ВТ-СР 9:00-14:00)
-                if weekday_name in WORK_SCHEDULE["Бареева Светлана Геннадьевна"]["days"]:
-                    slots = generate_time_slots(
-                        "9:00", "14:00", 15,
-                        current_date, workers[1].id, categories[2].id
-                    )
-                    all_time_slots.extend(slots)
-                
-                # Шарипова Альфия (СР-ЧТ 15:00-19:00)
-                if weekday_name in WORK_SCHEDULE["Шарипова Альфия Маратовна"]["days"]:
-                    slots = generate_time_slots(
-                        "15:00", "19:00", 15,
-                        current_date, workers[2].id, categories[2].id
-                    )
-                    all_time_slots.extend(slots)
-
-            session.add_all(all_time_slots)
-            session.commit()
-
-            logger.info("Данные для стоматологической клиники успешно добавлены в базу данных")
     except Exception as e:
-        logger.error(f"Ошибка при инициализации базы данных: {e}")
+        logger.error(f"Ошибка инициализации: {e}")
         session.rollback()
         raise
     finally:
         session.close()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     initialize_db()
