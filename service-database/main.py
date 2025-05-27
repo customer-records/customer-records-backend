@@ -23,7 +23,6 @@ DATABASE_URL = (
 )
 engine = create_engine(DATABASE_URL)
 
-# Ожидание подключения к БД
 def wait_for_db(engine, retries=5, delay_seconds=5):
     for attempt in range(retries):
         try:
@@ -35,12 +34,12 @@ def wait_for_db(engine, retries=5, delay_seconds=5):
             time.sleep(delay_seconds)
     raise RuntimeError("Не удалось подключиться к БД")
 
-# Генерация слотов с учётом перехода через полночь
 def generate_time_slots(start: dt_time, end: dt_time, duration_min: int,
                         slot_date: date, emp_id: int, cat_id: int):
     slots = []
     start_dt = datetime.combine(slot_date, start)
     end_dt = datetime.combine(slot_date, end)
+    # если сквозь полночь, но в нашем случае не нужно
     if end <= start:
         end_dt += timedelta(days=1)
     curr = start_dt
@@ -55,27 +54,23 @@ def generate_time_slots(start: dt_time, end: dt_time, duration_min: int,
         curr += timedelta(minutes=duration_min)
     return slots
 
-# Инициализация данных для кальянной
-
 def initialize_db():
     wait_for_db(engine)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
-        # 1. Категории услуг (каждая услуга — отдельная запись)
+        # 1. Категории услуг
         service_names = [
-            "Столик для двоих",
-            "Столик от 4 до 6 гостей",
-            "Столик от 4 до 6 гостей с Xbox",
-            "Столик от 4 до 6 гостей с PlayStation",
-            "VIP комната от 4 до 6 гостей"
+            "Первичная онлайн консультация",
+            "Стандартная онлайн консультация",
+            "Стандартная офлайн консультация"
         ]
         categories = []
         for name in service_names:
             cat = CategoryService(
                 name_category=name,
-                time_width_minutes_end=120,
+                time_width_minutes_end=60,
                 services_array=[name]
             )
             categories.append(cat)
@@ -83,17 +78,17 @@ def initialize_db():
         session.commit()
         logger.info("Категории услуг добавлены: %s", [c.id for c in categories])
 
-        # 2. Информация о компании
+        # 2. Описание практики
         company = CompanyDescription(
-            company_name="Beerloga",
-            company_description="Уютная кальянная с авторскими смесями и гостеприимной атмосферой",
+            company_name="MindCare",
+            company_description="Онлайн и офлайн консультации психолога Анны Сергеевны",
             company_adress_country="Россия",
-            company_adress_city="Казань",
-            company_adress_street="Мавлютого",
-            company_adress_house_number="46",
+            company_adress_city="Москва",
+            company_adress_street="Ленинградский проспект",
+            company_adress_house_number="10",
             company_adress_house_number_index="000000",
-            time_work_start=dt_time(14, 0),
-            time_work_end=dt_time(2, 0),
+            time_work_start=dt_time(10, 0),
+            time_work_end=dt_time(22, 0),
             weekdays_work_1=True,
             weekdays_work_2=True,
             weekdays_work_3=True,
@@ -106,51 +101,44 @@ def initialize_db():
         session.commit()
         logger.info("Информация о компании добавлена: %s", company.id)
 
-        # 3. Добавляем специалистов-кальянщиков и генерируем слоты для каждой услуги
+        # 3. Специалист: Анна Сергеевна — одна на все услуги
         salt = bcrypt.gensalt()
         slots = []
-        # дни работы специалистов
-        sergey_days = {0, 2, 4, 6}  # Пн, Ср, Пт, Вс
-        nikita_days = {1, 3, 5}     # Вт, Чт, Сб
+        today = date.today()
         for cat in categories:
-            # создаем Сергея для этой услуги
-            sergey = User(
+            # уникальные email и chat_id для каждой услуги
+            email = f"anna_{cat.id}@mindcare.ru"
+            raw_password = "psychology123"
+            anna = User(
                 role="owner",
-                email=f"sergey_{cat.id}@beerloga.ru",
-                password=bcrypt.hashpw(f"sergeypass{cat.id}".encode(), salt).decode(),
-                name="Кальянщик",
-                last_name="Сергей",
-                phone_number="79000000001",
+                email=email,
+                password=bcrypt.hashpw(raw_password.encode(), salt).decode(),
+                name="Анна",
+                last_name="Сергеевна",
+                phone_number="79001234567",
                 id_category_service=cat.id,
-                chat_id="300000001",
-                tg_name=f"hookah_sergey_{cat.id}"
+                chat_id=f"40000000{cat.id}",
+                tg_name=f"anna_psy_{cat.id}"
             )
-            # создаем Никиту для этой услуги
-            nikita = User(
-                role="worker",
-                email=f"nikita_{cat.id}@beerloga.ru",
-                password=bcrypt.hashpw(f"nikitapass{cat.id}".encode(), salt).decode(),
-                name="Кальянщик",
-                last_name="Никита",
-                phone_number="79000000002",
-                id_category_service=cat.id,
-                chat_id="300000002",
-                tg_name=f"hookah_nikita_{cat.id}"
-            )
-            session.add_all([sergey, nikita])
-            session.flush()  # чтобы получить ID
-            # генерация слотов для Сергея
-            today = date.today()
+            session.add(anna)
+            session.flush()  # чтобы получить anna.id
+
+            # генерируем слоты на неделю вперёд, каждый день
             for delta in range(7):
                 d = today + timedelta(days=delta)
-                if d.weekday() in sergey_days:
-                    slots.extend(generate_time_slots(dt_time(16,30), dt_time(2,0), 120, d, sergey.id, cat.id))
-                if d.weekday() in nikita_days:
-                    slots.extend(generate_time_slots(dt_time(16,30), dt_time(2,0), 120, d, nikita.id, cat.id))
+                slots.extend(generate_time_slots(
+                    dt_time(10, 0),
+                    dt_time(22, 0),
+                    60,
+                    d,
+                    emp_id=anna.id,
+                    cat_id=cat.id
+                ))
+
         session.commit()
         session.add_all(slots)
         session.commit()
-        logger.info("Специалисты и слоты добавлены для каждой услуги")
+        logger.info("Пользователь и тайм-слоты добавлены для каждой услуги")
 
     except Exception as e:
         logger.error(f"Ошибка инициализации: {e}")

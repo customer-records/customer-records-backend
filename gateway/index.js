@@ -14,11 +14,11 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-// Проксирование на сервис аутентификации (auth_hookah)
+// Проксирование на сервис аутентификации (auth_psy)
 app.use(
   "/auth",
   createProxyMiddleware({
-    target: "http://auth_hookah:3000",
+    target: "http://auth_psy:3000",
     changeOrigin: true,
     pathRewrite: { "^/auth": "" },
     onError: (err, req, res) => {
@@ -28,11 +28,11 @@ app.use(
   })
 );
 
-// Проксирование на сервис календаря (calendar_hookah)
+// Проксирование на сервис календаря (calendar_psy)
 app.use(
   "/calendar",
   createProxyMiddleware({
-    target: "http://calendar_hookah:8000",
+    target: "http://calendar_psy:8000",
     changeOrigin: true,
     pathRewrite: { "^/calendar": "" },
     onError: (err, req, res) => {
@@ -42,11 +42,11 @@ app.use(
   })
 );
 
-// Проксирование на Telegram Code Sender (telegram-code-sender-hookah)
+// Проксирование на Telegram Code Sender (telegram-code-sender-psy)
 app.use(
   "/telegram",
   createProxyMiddleware({
-    target: "http://telegram-code-sender-hookah:7000",
+    target: "http://telegram-code-sender-psy:7000",
     changeOrigin: true,
     pathRewrite: { "^/telegram": "" },
     onError: (err, req, res) => {
@@ -56,11 +56,11 @@ app.use(
   })
 );
 
-// Проксирование на WhatsApp Code Sender (whatsapp-code-sender-hookah)
+// Проксирование на WhatsApp Code Sender (whatsapp-code-sender-psy)
 app.use(
   "/whatsapp",
   createProxyMiddleware({
-    target: "http://whatsapp-code-sender-hookah:7001",
+    target: "http://whatsapp-code-sender-psy:7001",
     changeOrigin: true,
     pathRewrite: { "^/whatsapp": "" },
     onError: (err, req, res) => {
@@ -70,11 +70,11 @@ app.use(
   })
 );
 
-// Проксирование на Telegram Bot (telegram-bot-hookah)
+// Проксирование на Telegram Bot (telegram-bot-psy)
 app.use(
   "/bot",
   createProxyMiddleware({
-    target: "http://telegram-bot-hookah:5000",
+    target: "http://telegram-bot-psy:5000",
     changeOrigin: true,
     pathRewrite: { "^/bot": "" },
     onError: (err, req, res) => {
@@ -84,20 +84,6 @@ app.use(
   })
 );
 
-// (Опционально) Если в hookah-окружении нет parser-сервиса, убрать этот блок
-// app.use(
-//   '/parser',
-//   createProxyMiddleware({
-//     target: 'http://parser_hookah:3002',
-//     changeOrigin: true,
-//     pathRewrite: { '^/parser': '' },
-//     onError: (err, req, res) => {
-//       console.error('Parser service error:', err);
-//       res.status(502).json({ error: 'Parser service unavailable' });
-//     },
-//   })
-// );
-
 // Обработка несуществующих маршрутов
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
@@ -105,18 +91,17 @@ app.use((req, res) => {
 
 // Глобальная обработка ошибок
 app.use((err, req, res, next) => {
-  console.error("Gateway error:", err);
+  console.error("Gateway_psy error:", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`Gateway_hookah запущен на порту ${PORT}`);
+  console.log(`Gateway_psy запущен на порту ${PORT}`);
   console.log("Маршруты:");
-  console.log("- /auth/*     -> auth_hookah:3000");
-  console.log("- /calendar/* -> calendar_hookah:8000");
-  console.log("- /telegram/* -> telegram-code-sender-hookah:7000");
-  console.log("- /whatsapp/* -> whatsapp-code-sender-hookah:7001");
-  console.log("- /bot/*      -> telegram-bot-hookah:5000");
-  // console.log('- /parser/*   -> parser_hookah:3002');
+  console.log("- /auth/*     -> auth_psy:3000");
+  console.log("- /calendar/* -> calendar_psy:8000");
+  console.log("- /telegram/* -> telegram-code-sender-psy:7000");
+  console.log("- /whatsapp/* -> whatsapp-code-sender-psy:7001");
+  console.log("- /bot/*      -> telegram-bot-psy:5000");
 });

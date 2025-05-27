@@ -1,8 +1,8 @@
 version: "3.8"
 
 services:
-  # База данных для hookah-версии
-  db_hookah:
+  # База данных для психолога
+  db_psy:
     image: postgres:13
     env_file:
       - .env
@@ -11,133 +11,133 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5440:5432"
+      - "5443:5432"
     volumes:
-      - postgres_data_hookah:/var/lib/postgresql/data
+      - postgres_data_psy:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # Инициализация схемы для hookah-базы
-  database-init-hookah:
+  # Инициализация схемы для психолога
+  database-init-psy:
     build: ./service-database
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_hookah
+      DB_HOST: db_psy
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db_hookah:
+      db_psy:
         condition: service_healthy
 
-  # Gateway hookah
-  gateway_hookah:
+  # Gateway для психолога
+  gateway_psy:
     build: ./gateway
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_hookah
+      DB_HOST: db_psy
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4004:4000"
+      - "4006:4000"
     depends_on:
-      - db_hookah
-      - database-init-hookah
+      - db_psy
+      - database-init-psy
 
-  # Auth hookah
-  auth_hookah:
+  # Auth для психолога
+  auth_psy:
     build: ./service-auth
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_hookah
+      DB_HOST: db_psy
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3004:3000"
+      - "3006:3000"
     depends_on:
-      - db_hookah
-      - database-init-hookah
+      - db_psy
+      - database-init-psy
 
-  # Calendar hookah
-  calendar_hookah:
+  # Calendar для психолога
+  calendar_psy:
     build: ./service-calendar
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_hookah
+      DB_HOST: db_psy
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot-hookah:5000"
-      WHATSAPP_SERVICE_URL: "whatsapp-code-sender-hookah:7001"
+      TELEGRAM_BOT_SERVICE: "telegram-bot-psy:5000"
+      WHATSAPP_SERVICE_URL: "whatsapp-code-sender-psy:7001"
     ports:
-      - "8004:8000"
+      - "8006:8000"
     depends_on:
-      - db_hookah
-      - database-init-hookah
+      - db_psy
+      - database-init-psy
 
-  # Telegram Bot hookah
-  telegram-bot-hookah:
+  # Telegram Bot для психолога
+  telegram-bot-psy:
     build: ./service-telegram-bot
     env_file:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar_hookah:8000"
+      SERVICE_CALENDAR_URL: "calendar_psy:8000"
     ports:
-      - "5004:5000"
+      - "5006:5000"
     depends_on:
-      - calendar_hookah
+      - calendar_psy
 
-  # Telegram Code Sender hookah
-  telegram-code-sender-hookah:
+  # Telegram Code Sender для психолога
+  telegram-code-sender-psy:
     build: ./service-telegram-code-sender
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db_hookah
+      DB_HOST: db_psy
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7006:7000"
+      - "7009:7000"
     depends_on:
-      - db_hookah
-      - database-init-hookah
+      - db_psy
+      - database-init-psy
 
-  # WhatsApp Code Sender hookah
-  whatsapp-code-sender-hookah:
+  # WhatsApp Code Sender для психолога
+  whatsapp-code-sender-psy:
     build: ./service-whatsapp-code-sender
     env_file:
       - .env
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7007:7001"
+      - "7010:7001"
     volumes:
-      - whatsapp-session-hookah:/app/.wwebjs_auth
+      - whatsapp-session-psy:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      - db_hookah
-      - database-init-hookah
+      - db_psy
+      - database-init-psy
 
 volumes:
-  postgres_data_hookah:
-  whatsapp-session-hookah:
+  postgres_data_psy:
+  whatsapp-session-psy:
