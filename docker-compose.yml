@@ -1,8 +1,8 @@
 version: "3.8"
 
 services:
-  # Тестовая база
-  db:
+  # База данных для dockm
+  db_dockm:
     image: postgres:13
     env_file:
       - .env
@@ -11,147 +11,140 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5438:5432"
+      - "5446:5432" # 5443 + 3
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_dockm:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # Инициализация схемы тестовой базы
-  database-init:
+  # Инициализация схемы для dockm
+  database-init-dockm:
+    image: customer-records-backend-database-init-dockm
     build: ./service-database
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_dockm
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     depends_on:
-      db:
+      db_dockm:
         condition: service_healthy
 
-  # Gateway
-  gateway:
+  # Gateway для dockm
+  gateway-dockm:
+    image: customer-records-backend-gateway-dockm
     build: ./gateway
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_dockm
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "4000:4000"
+      - "4009:4000" # основной gateway остаётся 4009
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_dockm
+      - database-init-dockm
 
-  # Auth
-  auth:
+  # Auth для dockm
+  auth-dockm:
+    image: customer-records-backend-auth-dockm
     build: ./service-auth
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_dockm
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     ports:
-      - "3000:3000"
+      - "3009:3000" # 3006 + 3
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_dockm
+      - database-init-dockm
 
-  # Calendar
-  calendar:
+  # Calendar для dockm
+  calendar-dockm:
+    image: customer-records-backend-calendar-dockm
     build: ./service-calendar
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_dockm
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
-      TELEGRAM_BOT_SERVICE: "telegram-bot:5000"
+      TELEGRAM_BOT_SERVICE: "telegram-bot-dockm:5000"
+      WHATSAPP_SERVICE_URL: "whatsapp-code-sender-dockm:7001"
     ports:
-      - "8000:8000"
+      - "8009:8000" # 8006 + 3
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_dockm
+      - database-init-dockm
 
-  # Telegram Bot
-  telegram-bot:
+  # Telegram Bot для dockm
+  telegram-bot-dockm:
+    image: customer-records-backend-telegram-bot-dockm
     build: ./service-telegram-bot
     env_file:
       - .env
     environment:
       TELEGRAM_BOT_TOKEN_INFO: ${TELEGRAM_BOT_TOKEN_INFO}
-      SERVICE_CALENDAR_URL: "calendar:8000"
+      SERVICE_CALENDAR_URL: "calendar-dockm:8000"
     ports:
-      - "5000:5000"
+      - "5009:5000" # 5006 + 3
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
-      calendar:
-        condition: service_started
+      - calendar-dockm
 
-  # Telegram Code Sender
-  telegram-code-sender:
+  # Telegram Code Sender для dockm
+  telegram-code-sender-dockm:
+    image: customer-records-backend-telegram-code-sender-dockm
     build: ./service-telegram-code-sender
     env_file:
       - .env
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
+      DB_HOST: db_dockm
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     ports:
-      - "7000:7000"
+      - "7012:7000" # 7009 + 3
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_dockm
+      - database-init-dockm
 
-  # WhatsApp Code Sender
-  whatsapp-code-sender:
+  # WhatsApp Code Sender для dockm
+  whatsapp-code-sender-dockm:
+    image: customer-records-backend-whatsapp-code-sender-dockm
     build: ./service-whatsapp-code-sender
     env_file:
       - .env
     environment:
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "7001:7001"
+      - "7013:7001" # 7010 + 3
     volumes:
-      - whatsapp-session:/app/.wwebjs_auth
+      - whatsapp-session-dockm:/app/.wwebjs_auth
     security_opt:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
     depends_on:
-      db:
-        condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
+      - db_dockm
+      - database-init-dockm
 
 volumes:
-  postgres_data:
-  whatsapp-session:
+  postgres_data_dockm:
+  whatsapp-session-dockm:
