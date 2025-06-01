@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Настройка базы данных
-DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@" \
-               f"{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+DATABASE_URL = (
+    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@"
+    f"{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+)
 logger.info(f"Подключение к базе данных по URL: {DATABASE_URL}")
 engine = create_engine(DATABASE_URL)
 
@@ -58,6 +60,7 @@ WEEKDAYS = {
     6: "ВС"
 }
 
+
 def wait_for_db(engine, retries=5, delay=5):
     for i in range(retries):
         try:
@@ -65,18 +68,19 @@ def wait_for_db(engine, retries=5, delay=5):
                 logger.info("Подключение к базе данных успешно!")
                 return True
         except OperationalError as e:
-            logger.error(f"Попытка {i + 1}/{retries}: Не удалось подключиться к базе данных. Ошибка: {e}")
+            logger.error(f"Попытка {i + 1}/{retries}: Не удалось подключиться к БД. Ошибка: {e}")
             time.sleep(delay)
-    raise Exception("Не удалось подключиться к базе данных после нескольких попыток.")
+    raise Exception("Не удалось подключиться к БД после нескольких попыток.")
+
 
 def generate_time_slots(start_time_str, end_time_str, duration_minutes, slot_date, worker_id, category_id):
     slots = []
     start_time = datetime.strptime(start_time_str, "%H:%M").time()
     end_time = datetime.strptime(end_time_str, "%H:%M").time()
-    
+
     current_time = datetime.combine(slot_date, start_time)
     end_datetime = datetime.combine(slot_date, end_time)
-    
+
     while current_time + timedelta(minutes=duration_minutes) <= end_datetime:
         slots.append(TimeSlot(
             id_category_service=category_id,
@@ -86,15 +90,15 @@ def generate_time_slots(start_time_str, end_time_str, duration_minutes, slot_dat
             id_time_width_minutes_end=category_id
         ))
         current_time += timedelta(minutes=duration_minutes)
-    
+
     return slots
+
 
 def create_initial_data(session):
     """
-    Добавляет базовые записи в таблицы User, CategoryService, CompanyDescription и клиентов, 
+    Добавляет базовые записи в таблицы User, CategoryService, CompanyDescription и клиентов,
     если они ещё не существуют.
     """
-    # Проверяем, есть ли уже данные
     if session.query(User).first():
         return  # Данные уже есть, пропускаем
 
@@ -228,31 +232,27 @@ def create_initial_data(session):
     session.add_all(clients)
     session.commit()
 
+
 def generate_week_slots(session, start_date: date):
     """
     Генерирует и сохраняет временные слоты для заданной недели, начиная со start_date (понедельник).
     Если слоты на какую-либо дату уже существуют, они не дублируются.
     """
-    # Получаем все специалистов и категории
     owner = session.query(User).filter(User.role == "owner").first()
     workers = session.query(User).filter(User.role == "worker").all()
     categories = session.query(CategoryService).all()
 
     all_time_slots = []
-    # Проходим по 7 дням недели, начиная с start_date
     for day_offset in range(7):
         current_date = start_date + timedelta(days=day_offset)
         weekday_num = current_date.weekday()  # 0-ПН, 6-ВС
         weekday_name = WEEKDAYS[weekday_num]
 
-        # Проверяем, не созданы ли слоты для этой даты вообще (чтобы не дублировать)
         existing_for_day = session.query(TimeSlot).filter(TimeSlot.date == current_date).first()
         if existing_for_day:
-            continue  # Если найдены слоты хоть одного врача, пропускаем этот день
+            continue
 
-        # 1. Гадисов Ренат Фамильевич (работает ПТ, СБ)
         if weekday_name in WORK_SCHEDULE["Гадисов Ренат Фамильевич"]["days"]:
-            # Категория: Хирург имплантолог (categories[0])
             slots = generate_time_slots(
                 WORK_SCHEDULE["Гадисов Ренат Фамильевич"]["hours"][0],
                 WORK_SCHEDULE["Гадисов Ренат Фамильевич"]["hours"][1],
@@ -263,9 +263,7 @@ def generate_week_slots(session, start_date: date):
             )
             all_time_slots.extend(slots)
 
-        # 2. Сергеев Ринат Леонидович (работает ПН–СБ)
         if weekday_name in WORK_SCHEDULE["Сергеев Ринат Леонидович"]["days"]:
-            # Категория: Терапевт-ортопед (categories[1])
             slots = generate_time_slots(
                 WORK_SCHEDULE["Сергеев Ринат Леонидович"]["hours"][0],
                 WORK_SCHEDULE["Сергеев Ринат Леонидович"]["hours"][1],
@@ -276,9 +274,7 @@ def generate_week_slots(session, start_date: date):
             )
             all_time_slots.extend(slots)
 
-        # 3. Бареева Светлана Геннадьевна (работает ВТ–СР)
         if weekday_name in WORK_SCHEDULE["Бареева Светлана Геннадьевна"]["days"]:
-            # Категория: Стоматолог-терапевт (categories[2])
             slots = generate_time_slots(
                 WORK_SCHEDULE["Бареева Светлана Геннадьевна"]["hours"][0],
                 WORK_SCHEDULE["Бареева Светлана Геннадьевна"]["hours"][1],
@@ -289,9 +285,7 @@ def generate_week_slots(session, start_date: date):
             )
             all_time_slots.extend(slots)
 
-        # 4. Шарипова Альфия Маратовна (работает СР–ЧТ)
         if weekday_name in WORK_SCHEDULE["Шарипова Альфия Маратовна"]["days"]:
-            # Категория: Стоматолог-терапевт (categories[2])
             slots = generate_time_slots(
                 WORK_SCHEDULE["Шарипова Альфия Маратовна"]["hours"][0],
                 WORK_SCHEDULE["Шарипова Альфия Маратовна"]["hours"][1],
@@ -307,6 +301,7 @@ def generate_week_slots(session, start_date: date):
         session.commit()
         logger.info(f"Добавлены временные слоты для недели, начинающейся {start_date}")
 
+
 def refresh_weekly_slots():
     """
     Функция, запускаемая раз в неделю по расписанию (каждое воскресенье),
@@ -315,14 +310,13 @@ def refresh_weekly_slots():
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
-        # Находим ближайший понедельник следующей недели
         today = date.today()
-        # Вычисляем, сколько дней до следующего понедельника
-        days_ahead = (7 - today.weekday()) % 7  # если сегодня воскресенье (6), days_ahead = 1
-        next_monday = today + timedelta(days=days_ahead + 1) if days_ahead == 0 else today + timedelta(days=days_ahead)
-        # Если сегодня не воскресенье, убедимся, что next_monday – это фактически следующий понедельник
-        if today.weekday() != 6:
-            # надо найти следующий понедельник после сегодняшнего
+        # Если сегодня воскресенье, то хотим именно следующий понедельник:
+        # next_monday = сегодня + 1 день
+        if today.weekday() == 6:
+            next_monday = today + timedelta(days=1)
+        else:
+            # Иначе: найти ближайший следующий понедельник
             next_monday = today + timedelta(days=(7 - today.weekday()))
         logger.info(f"Запуск еженедельного создания слотов. Следующий понедельник: {next_monday}")
         generate_week_slots(session, next_monday)
@@ -331,11 +325,12 @@ def refresh_weekly_slots():
     finally:
         session.close()
 
+
 def initialize_db_and_slots():
     """
-    Вызывается при старте сервиса: создаёт базовые данные, 
-    затем генерирует текущую неделю (если необходимо),
-    а дальше стартует планировщик.
+    Вызывается при старте сервиса: создаёт базовые данные,
+    затем генерирует либо текущую неделю, либо следующую (если сегодня воскресенье),
+    а потом запускает планировщик.
     """
     wait_for_db(engine)
     Base.metadata.create_all(bind=engine)
@@ -344,14 +339,16 @@ def initialize_db_and_slots():
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
-        # Инициализируем базовые данные (если их нет)
         create_initial_data(session)
 
-        # Генерируем слоты для текущей недели
         today = date.today()
-        # Находим понедельник текущей недели
-        current_monday = today - timedelta(days=today.weekday())
-        logger.info(f"Создание слотов для текущей недели (понедельник = {current_monday})")
+        # Если сегодня воскресенье, формируем сразу слоты на следующую неделю
+        if today.weekday() == 6:
+            current_monday = today + timedelta(days=1)
+        else:
+            # иначе — понедельник текущей недели
+            current_monday = today - timedelta(days=today.weekday())
+        logger.info(f"Создание слотов для недели (понедельник = {current_monday})")
         generate_week_slots(session, current_monday)
 
     except Exception as e:
@@ -361,20 +358,24 @@ def initialize_db_and_slots():
     finally:
         session.close()
 
+
 if __name__ == "__main__":
-    # Инициализация БД и данных (включая слоты текущей недели)
+    # Инициализация БД и данных (включая слоты)
     initialize_db_and_slots()
 
-    # Настраиваем планировщик для еженедельного обновления (каждое воскресенье в 00:00)
+    # Планировщик: каждое воскресенье в 00:00
     scheduler = BackgroundScheduler()
-    # Параметр 'day_of_week' = 'sun', время 00:00
-    scheduler.add_job(refresh_weekly_slots, trigger='cron', day_of_week='sun', hour=0, minute=0)
+    scheduler.add_job(
+        refresh_weekly_slots,
+        trigger='cron',
+        day_of_week='sun',
+        hour=0,
+        minute=0
+    )
     scheduler.start()
-
     logger.info("Планировщик запущен. Слоты будут обновляться каждое воскресенье.")
 
     try:
-        # Держим процесс живым, чтобы планировщик работал
         while True:
             time.sleep(60)
     except (KeyboardInterrupt, SystemExit):
