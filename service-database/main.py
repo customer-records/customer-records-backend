@@ -8,6 +8,7 @@ import time
 from datetime import datetime, date, time as dt_time, timedelta
 from models import Base, CategoryService, CompanyDescription, User, TimeSlot
 import bcrypt
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,6 @@ DATABASE_URL = (
 )
 engine = create_engine(DATABASE_URL)
 
-# Ожидание подключения к БД
 def wait_for_db(engine, retries=5, delay_seconds=5):
     for attempt in range(retries):
         try:
@@ -35,7 +35,6 @@ def wait_for_db(engine, retries=5, delay_seconds=5):
             time.sleep(delay_seconds)
     raise RuntimeError("Не удалось подключиться к БД")
 
-# Генерация слотов с учётом перехода через полночь
 def generate_time_slots(start: dt_time, end: dt_time, duration_min: int,
                         slot_date: date, emp_id: int, cat_id: int):
     slots = []
@@ -55,15 +54,13 @@ def generate_time_slots(start: dt_time, end: dt_time, duration_min: int,
         curr += timedelta(minutes=duration_min)
     return slots
 
-# Инициализация данных для кальянной
-
 def initialize_db():
     wait_for_db(engine)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
     try:
-        # 1. Категории услуг (каждая услуга — отдельная запись)
+        # 1. Категории услуг
         service_names = [
             "Столик для двоих",
             "Столик от 4 до 6 гостей",
@@ -139,7 +136,7 @@ def initialize_db():
             )
             session.add_all([sergey, nikita])
             session.flush()  # чтобы получить ID
-            # генерация слотов для Сергея
+            # генерация слотов для этой и следующих 6 дней (текущая неделя)
             today = date.today()
             for delta in range(7):
                 d = today + timedelta(days=delta)
@@ -159,5 +156,75 @@ def initialize_db():
     finally:
         session.close()
 
+def generate_next_week_slots():
+    """
+    Генерирует слоты для следующей недели (начиная с ближайшего понедельника после текущей даты).
+    Аналогично initialize_db, но только слоты — без пересоздания категорий и пользователей.
+    """
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        # Вычисляем следующий понедельник:
+        today = date.today()
+        if today.weekday() == 6:  # если сегодня воскресенье
+            next_monday = today + timedelta(days=1)
+        else:
+            next_monday = today + timedelta(days=(7 - today.weekday()))
+
+        # Получаем категории и пользователей
+        categories = session.query(CategoryService).all()
+        # Специалисты по категориям: каждая категория имеет двух юзеров—«owner» (Сергей) и «worker» (Никита)
+        # Для упрощения: ищем по id_category_service и role
+        slots = []
+        for cat in categories:
+            sergey = session.query(User).filter_by(
+                id_category_service=cat.id, role="owner"
+            ).first()
+            nikita = session.query(User).filter_by(
+                id_category_service=cat.id, role="worker"
+            ).first()
+            sergey_days = {0, 2, 4, 6}  # Пн, Ср, Пт, Вс
+            nikita_days = {1, 3, 5}     # Вт, Чт, Сб
+
+            for delta in range(7):
+                d = next_monday + timedelta(days=delta)
+                if d.weekday() in sergey_days and sergey:
+                    slots.extend(generate_time_slots(
+                        dt_time(16,30), dt_time(2,0), 120, d, sergey.id, cat.id
+                    ))
+                if d.weekday() in nikita_days and nikita:
+                    slots.extend(generate_time_slots(
+                        dt_time(16,30), dt_time(2,0), 120, d, nikita.id, cat.id
+                    ))
+        if slots:
+            session.add_all(slots)
+            session.commit()
+            logger.info(f"Автозаполнение: добавлены слоты для недели, начинающейся {next_monday}")
+    except Exception as e:
+        logger.error(f"Ошибка при автозаполнении на следующую неделю: {e}")
+    finally:
+        session.close()
+
 if __name__ == '__main__':
+    # 1. Инициализация БД и первоначальная загрузка
     initialize_db()
+
+    # 2. Планировщик, который каждое воскресенье в 00:00 запускает автозаполнение на следующую неделю
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        generate_next_week_slots,
+        trigger='cron',
+        day_of_week='sun',
+        hour=0,
+        minute=0
+    )
+    scheduler.start()
+    logger.info("Планировщик запущен. Автозаполнение слотов запланировано каждое воскресенье в 00:00.")
+
+    try:
+        # Поддерживаем процесс живым, чтобы планировщик работал
+        while True:
+            time.sleep(60)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
+        logger.info("Планировщик остановлен, сервис завершает работу.")
