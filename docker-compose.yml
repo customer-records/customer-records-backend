@@ -20,7 +20,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Инициализация схемы тестовой базы
+  # Инициализация схемы тестовой базы (включая автозаполнение)
   database-init:
     build: ./service-database
     env_file:
@@ -51,8 +51,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
 
   # Auth
   auth:
@@ -70,8 +68,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
 
   # Calendar
   calendar:
@@ -90,8 +86,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
 
   # Telegram Bot
   telegram-bot:
@@ -106,8 +100,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
       calendar:
         condition: service_started
 
@@ -128,8 +120,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
 
   # WhatsApp Code Sender
   whatsapp-code-sender:
@@ -149,8 +139,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
 
 volumes:
   postgres_data:
