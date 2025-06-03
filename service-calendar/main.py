@@ -8,12 +8,13 @@ from dotenv import load_dotenv
 from fastapi import Response
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as _date
 from typing import List, Optional
 from pydantic import BaseModel
 from models import Base, CategoryService, TimeSlot, User, OnlineRegistration, Client, CompanyDescription  # Импорт всех моделей
 import httpx
 from ics import Calendar, Event
+
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,6 +82,27 @@ class CompanyResponse(BaseModel):
     time_work_start: str
     time_work_end: str
     work_days: List[str]
+
+# Схемы для CRUD управления слотами (административные)
+class AdminTimeSlotCreate(BaseModel):
+    id_category_service: int
+    id_employer: int
+    date: str            # формат "YYYY-MM-DD"
+    time_start: str      # формат "HH:MM"
+
+class AdminTimeSlotUpdate(BaseModel):
+    id_category_service: Optional[int] = None
+    id_employer: Optional[int] = None
+    date: Optional[str] = None
+    time_start: Optional[str] = None
+
+class AdminTimeSlotResponse(BaseModel):
+    id: int
+    id_category_service: int
+    id_employer: int
+    date: str
+    time_start: str
+    time_end: str
 
 # Настройка базы данных
 DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
@@ -400,6 +422,185 @@ def get_company_info(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Ошибка при получении информации о компании: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/admin/timeslots/", response_model=List[AdminTimeSlotResponse])
+def read_all_slots(db: Session = Depends(get_db)):
+    """
+    Возвращает все временные слоты (для администратора), включая вычисленное time_end.
+    """
+    slots = db.query(TimeSlot).all()
+    result = []
+    for slot in slots:
+        # вычисляем time_end
+        service = db.query(CategoryService).filter(CategoryService.id == slot.id_category_service).first()
+        duration = service.time_width_minutes_end if service else 0
+        end_time = (datetime.combine(_date.min, slot.time_start) + timedelta(minutes=duration)).time().strftime("%H:%M")
+        result.append(AdminTimeSlotResponse(
+            id=slot.id,
+            id_category_service=slot.id_category_service,
+            id_employer=slot.id_employer,
+            date=slot.date.strftime("%Y-%m-%d"),
+            time_start=slot.time_start.strftime("%H:%M"),
+            time_end=end_time
+        ))
+    return result
+
+@app.get("/admin/timeslots/{slot_id}/", response_model=AdminTimeSlotResponse)
+def read_slot(slot_id: int, db: Session = Depends(get_db)):
+    """
+    Возвращает один временной слот по ID (для администратора).
+    """
+    slot = db.query(TimeSlot).filter(TimeSlot.id == slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="TimeSlot not found")
+    service = db.query(CategoryService).filter(CategoryService.id == slot.id_category_service).first()
+    duration = service.time_width_minutes_end if service else 0
+    end_time = (datetime.combine(_date.min, slot.time_start) + timedelta(minutes=duration)).time().strftime("%H:%M")
+    return AdminTimeSlotResponse(
+        id=slot.id,
+        id_category_service=slot.id_category_service,
+        id_employer=slot.id_employer,
+        date=slot.date.strftime("%Y-%m-%d"),
+        time_start=slot.time_start.strftime("%H:%M"),
+        time_end=end_time
+    )
+
+@app.post("/admin/timeslots/", response_model=AdminTimeSlotResponse, status_code=201)
+def create_slot(payload: AdminTimeSlotCreate, db: Session = Depends(get_db)):
+    """
+    Создание нового временного слота (для администратора).
+    """
+    # Проверяем, что работник существует и его роль
+    employer = db.query(User).filter(User.id == payload.id_employer).first()
+    if not employer or employer.role not in ("worker", "owner"):
+        raise HTTPException(status_code=404, detail="Employer not found or not a worker/owner")
+
+    # Проверяем, что услуга существует
+    service = db.query(CategoryService).filter(CategoryService.id == payload.id_category_service).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="CategoryService not found")
+
+    # Проверяем формат даты и времени
+    try:
+        slot_date = datetime.strptime(payload.date, "%Y-%m-%d").date()
+        slot_time = datetime.strptime(payload.time_start, "%H:%M").time()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date or time format. Date: YYYY-MM-DD, Time: HH:MM")
+
+    # Проверяем коллизию: один и тот же работник, дата, время начала
+    conflict = db.query(TimeSlot).filter(
+        TimeSlot.id_employer == payload.id_employer,
+        TimeSlot.date == slot_date,
+        TimeSlot.time_start == slot_time
+    ).first()
+    if conflict:
+        raise HTTPException(status_code=400, detail="TimeSlot already exists for this employer at this datetime")
+
+    # Сохраняем новый слот
+    new_slot = TimeSlot(
+        id_category_service=payload.id_category_service,
+        id_employer=payload.id_employer,
+        date=slot_date,
+        time_start=slot_time,
+        id_time_width_minutes_end=payload.id_category_service
+    )
+    db.add(new_slot)
+    db.commit()
+    db.refresh(new_slot)
+
+    # Вычисляем time_end
+    duration = service.time_width_minutes_end
+    end_time = (datetime.combine(_date.min, slot_time) + timedelta(minutes=duration)).time().strftime("%H:%M")
+
+    return AdminTimeSlotResponse(
+        id=new_slot.id,
+        id_category_service=new_slot.id_category_service,
+        id_employer=new_slot.id_employer,
+        date=new_slot.date.strftime("%Y-%m-%d"),
+        time_start=new_slot.time_start.strftime("%H:%M"),
+        time_end=end_time
+    )
+
+@app.put("/admin/timeslots/{slot_id}/", response_model=AdminTimeSlotResponse)
+def update_slot(slot_id: int, payload: AdminTimeSlotUpdate, db: Session = Depends(get_db)):
+    """
+    Редактирование существующего временного слота (для администратора).
+    """
+    slot = db.query(TimeSlot).filter(TimeSlot.id == slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="TimeSlot not found")
+
+    # Новые значения или старые, если не переданы
+    new_category = payload.id_category_service if payload.id_category_service is not None else slot.id_category_service
+    new_employer = payload.id_employer if payload.id_employer is not None else slot.id_employer
+    new_date_str = payload.date if payload.date is not None else slot.date.strftime("%Y-%m-%d")
+    new_time_str = payload.time_start if payload.time_start is not None else slot.time_start.strftime("%H:%M")
+
+    # Проверяем, что работник существует, если меняется
+    if payload.id_employer is not None:
+        emp = db.query(User).filter(User.id == new_employer).first()
+        if not emp or emp.role not in ("worker", "owner"):
+            raise HTTPException(status_code=404, detail="Employer not found or not a worker/owner")
+
+    # Проверяем, что услуга существует, если меняется
+    if payload.id_category_service is not None:
+        svc = db.query(CategoryService).filter(CategoryService.id == new_category).first()
+        if not svc:
+            raise HTTPException(status_code=404, detail="CategoryService not found")
+    else:
+        svc = db.query(CategoryService).filter(CategoryService.id == slot.id_category_service).first()
+
+    # Проверяем формат даты и времени
+    try:
+        slot_date = datetime.strptime(new_date_str, "%Y-%m-%d").date()
+        slot_time = datetime.strptime(new_time_str, "%H:%M").time()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date or time format. Date: YYYY-MM-DD, Time: HH:MM")
+
+    # Проверяем коллизию: тот же работник, та же дата, то же время, другой ID
+    conflict = db.query(TimeSlot).filter(
+        TimeSlot.id_employer == new_employer,
+        TimeSlot.date == slot_date,
+        TimeSlot.time_start == slot_time,
+        TimeSlot.id != slot.id
+    ).first()
+    if conflict:
+        raise HTTPException(status_code=400, detail="Another TimeSlot already exists at this datetime")
+
+    # Применяем изменения
+    slot.id_category_service = new_category
+    slot.id_employer = new_employer
+    slot.date = slot_date
+    slot.time_start = slot_time
+    slot.id_time_width_minutes_end = new_category
+
+    db.commit()
+    db.refresh(slot)
+
+    # Вычисляем time_end
+    duration = svc.time_width_minutes_end
+    end_time = (datetime.combine(_date.min, slot_time) + timedelta(minutes=duration)).time().strftime("%H:%M")
+
+    return AdminTimeSlotResponse(
+        id=slot.id,
+        id_category_service=slot.id_category_service,
+        id_employer=slot.id_employer,
+        date=slot.date.strftime("%Y-%m-%d"),
+        time_start=slot.time_start.strftime("%H:%M"),
+        time_end=end_time
+    )
+
+@app.delete("/admin/timeslots/{slot_id}/", status_code=204)
+def delete_slot(slot_id: int, db: Session = Depends(get_db)):
+    """
+    Удаление временного слота (для администратора).
+    """
+    slot = db.query(TimeSlot).filter(TimeSlot.id == slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="TimeSlot not found")
+    db.delete(slot)
+    db.commit()
+    return Response(status_code=204)
 
 @app.get("/")
 def read_root():
