@@ -140,6 +140,19 @@ services:
       db:
         condition: service_healthy
 
+  # *** Новый сервис: WhatsApp Parser ***
+  whatsapp-parser:
+    build: ./service-whatsapp-parser
+    env_file:
+      - .env
+    ports:
+      - "9000:9000"
+    volumes:
+      - whatsapp-parser-session:/app/chrome-data
+    depends_on:
+      - db
+
 volumes:
   postgres_data:
   whatsapp-session:
+  whatsapp-parser-session:
