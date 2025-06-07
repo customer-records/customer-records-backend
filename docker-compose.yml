@@ -142,13 +142,24 @@ services:
 
   # *** Новый сервис: WhatsApp Parser ***
   whatsapp-parser:
-    build: ./service-whatsapp-parser
+    build: ./service-whatsapp-code-sender
     env_file:
       - .env
     ports:
       - "9000:9000"
     volumes:
       - whatsapp-parser-session:/app/chrome-data
+    depends_on:
+      - db
+
+  telegram-ai-bot:
+    build: ./service-telegram-ai-bot
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_BOT_TOKEN_AI: ${TELEGRAM_BOT_TOKEN_AI}
+    ports:
+      - "10000:10000"
     depends_on:
       - db
 
