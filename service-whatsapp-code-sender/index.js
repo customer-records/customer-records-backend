@@ -1,10 +1,13 @@
 require("dotenv").config();
+process.env.TZ = "Europe/Moscow";
+
 const express = require("express");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const { Pool } = require("pg");
 const path = require("path");
 const cors = require("cors");
+const schedule = require("node-schedule");
 
 const app = express();
 app.use(express.json());
@@ -252,8 +255,8 @@ app.post("/send-notification", async (req, res) => {
   const {
     phone, // <-- был phone_number, теперь phone
     client_name,
-    appointment_date, // Ожидаем формат 'YYYY-MM-DD'
-    appointment_time, // Ожидаем формат 'HH:MM'
+    appointment_date, // формат 'YYYY-MM-DD'
+    appointment_time, // формат 'HH:MM'
     service_name,
     specialist_name,
   } = req.body;
@@ -272,7 +275,6 @@ app.post("/send-notification", async (req, res) => {
         "Missing one of: client_name, appointment_date, appointment_time",
     });
   }
-
   if (!whatsappClient.info) {
     return res.status(503).json({
       status: "error",
@@ -280,7 +282,7 @@ app.post("/send-notification", async (req, res) => {
     });
   }
 
-  // Построение текста уведомления
+  // Фабрика текста уведомления
   const buildMessage = () =>
     `Здравствуйте, ${client_name}!\n` +
     `Напоминаем о вашей записи на услугу: *${service_name}*.\n` +
@@ -288,57 +290,42 @@ app.post("/send-notification", async (req, res) => {
     `Дата: *${appointment_date}*, время: *${appointment_time}*.\n` +
     `Ждём вас! 😊`;
 
-  // Функция, которая отправляет уведомление одним сообщением
-  const sendReminderNow = async () => {
-    try {
-      await sendWhatsAppMessage(phone, buildMessage());
-    } catch (err) {
-      console.error("Ошибка при отправке уведомления:", err);
-    }
-  };
+  // Сразу при первичной записи
+  await sendWhatsAppMessage(phone, buildMessage());
 
-  // Сразу отправляем уведомление (при первичной записи)
-  await sendReminderNow();
-
-  // Парсим дату и время визита
-  const [year, month, day] = appointment_date.split("-").map(Number);
-  const [hour, minute] = appointment_time.split(":").map(Number);
-  const visitDateTime = new Date(year, month - 1, day, hour, minute, 0);
-
+  // Парсим дату/время визита
+  const [Y, M, D] = appointment_date.split("-").map(Number);
+  const [h, m] = appointment_time.split(":").map(Number);
+  const visitDate = new Date(Y, M - 1, D, 8, 0, 0); // 8:00 Москвы
   const now = new Date();
 
-  // Функция для планирования отправки через указанное время (ms)
-  const scheduleAt = (targetDateTime, description) => {
-    const delayMs = targetDateTime.getTime() - now.getTime();
-    if (delayMs > 0) {
+  // Хелпер для планирования
+  const scheduleReminder = (targetDate, label) => {
+    if (targetDate > now) {
       console.log(
-        `Планируем напоминание "${description}" через ${Math.floor(
-          delayMs / 1000
-        )} секунд.`
+        `Планируем напоминание "${label}" на ${targetDate.toString()}`
       );
-      setTimeout(() => {
-        console.log(`Отправляем запланированное напоминание: ${description}`);
-        sendReminderNow();
-      }, delayMs);
+      schedule.scheduleJob(targetDate, async () => {
+        console.log(`Отправляем запланированное напоминание: ${label}`);
+        await sendWhatsAppMessage(phone, buildMessage());
+      });
     } else {
-      console.log(`Время для "${description}" уже прошло, не планируем.`);
+      console.log(
+        `Пропускаем "${label}", время ${targetDate.toString()} уже прошло`
+      );
     }
   };
 
-  // За 3 дня до визита
-  const threeDaysBefore = new Date(
-    visitDateTime.getTime() - 3 * 24 * 60 * 60 * 1000
-  );
-  scheduleAt(threeDaysBefore, "за 3 дня до визита");
+  // 3 дня до визита
+  const threeDaysBefore = new Date(visitDate.getTime() - 3 * 24 * 3600 * 1000);
+  scheduleReminder(threeDaysBefore, "за 3 дня до визита");
 
-  // За 1 день до визита
-  const oneDayBefore = new Date(
-    visitDateTime.getTime() - 1 * 24 * 60 * 60 * 1000
-  );
-  scheduleAt(oneDayBefore, "за 1 день до визита");
+  // 1 день до визита
+  const oneDayBefore = new Date(visitDate.getTime() - 1 * 24 * 3600 * 1000);
+  scheduleReminder(oneDayBefore, "за 1 день до визита");
 
-  // В день визита (в указанное время)
-  scheduleAt(visitDateTime, "в день визита");
+  // В день визита в 8:00
+  scheduleReminder(visitDate, "в день визита");
 
   return res.json({ status: "success", message: "Notifications scheduled" });
 });
@@ -349,7 +336,7 @@ app.listen(PORT, () => {
   console.log(`WhatsApp Code Sender service running on port ${PORT}`);
 });
 
-// Обработка завершения работы
+// Обработка SIGINT
 process.on("SIGINT", async () => {
   console.log("Shutting down...");
   try {
