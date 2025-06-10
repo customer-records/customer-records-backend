@@ -9,4 +9,4 @@ httpx
 pytz
 icalendar
 ics
-zoneinfo
+backports.zoneinfo
