@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from models import Base, CategoryService, TimeSlot, User, OnlineRegistration, Client, CompanyDescription  # Импорт всех моделей
 import httpx
 from ics import Calendar, Event
+from zoneinfo import ZoneInfo
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -275,78 +276,66 @@ def get_all_services(db: Session = Depends(get_db)):
         logger.error(f"Ошибка при получении списка услуг: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     
-from zoneinfo import ZoneInfo
 
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
     """
-    Возвращает доступные слоты на дату (МСК):
-    - прошедшие даты → []
-    - сегодня     → только future-slots
-    - будущее     → все слоты
+    Возвращает актуальные слоты на указанную дату (по московскому времени),
+    отбрасывая те, которые уже в прошлом (и всю прошедшую дату).
     """
-    # 1. Текущее московское время
+    # текущий момент в Москве
     moscow_tz = ZoneInfo("Europe/Moscow")
-    now_moscow = datetime.now(moscow_tz)
-    # переводим в наивное время без tzinfo
-    naive_now = now_moscow.replace(tzinfo=None).time()
+    now_msk = datetime.now(moscow_tz)
 
-    # 2. Парсим target_date
+    # разбираем дату
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.")
 
-    # 3. Если дата в прошлом — сразу пустой список
-    if target_date < now_moscow.date():
-        return []
-
-    # 4. Собираем занятые слоты
-    booked = (
+    # берем все незабронированные слоты на эту дату
+    booked_ids = (
         db.query(OnlineRegistration.id_time_slot)
           .join(TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id)
           .filter(TimeSlot.date == target_date)
           .scalars()
           .all()
     )
-    booked_ids = set(booked)
+    booked_ids = set(booked_ids)
 
-    # 5. Формируем фильтры
-    filters = [
-        TimeSlot.date == target_date,
-        ~TimeSlot.id.in_(booked_ids)
-    ]
-    # если сегодня — отсекаем уже прошедшие
-    if target_date == now_moscow.date():
-        filters.append(TimeSlot.time_start > naive_now)
-
-    # 6. Делаем запрос
     rows = (
         db.query(TimeSlot, CategoryService, User)
           .join(CategoryService, TimeSlot.id_category_service == CategoryService.id)
           .join(User,         TimeSlot.id_employer          == User.id)
-          .filter(*filters)
+          .filter(
+              TimeSlot.date == target_date,
+              ~TimeSlot.id.in_(booked_ids)
+          )
           .all()
     )
 
-    # 7. Собираем ответ
     result: List[TimeSlotResponse] = []
     for ts, svc, usr in rows:
-        start = ts.time_start.strftime("%H:%M")
-        end   = (datetime.combine(datetime.min, ts.time_start)
-                 + timedelta(minutes=svc.time_width_minutes_end)
-                ).time().strftime("%H:%M")
+        # комбинируем дату и время в datetime и приводим к московской tz
+        slot_dt = datetime.combine(ts.date, ts.time_start).replace(tzinfo=moscow_tz)
+        # отбрасываем все, что <= сейчас
+        if slot_dt <= now_msk:
+            continue
 
+        # вычисляем конец
+        end_dt = slot_dt + timedelta(minutes=svc.time_width_minutes_end)
         result.append(TimeSlotResponse(
             id               = ts.id,
             date             = ts.date.strftime("%Y-%m-%d"),
-            time_start       = start,
-            time_end         = end,
+            time_start       = ts.time_start.strftime("%H:%M"),
+            time_end         = end_dt.time().strftime("%H:%M"),
             service_name     = svc.name_category,
             specialist_name  = f"{usr.name} {usr.last_name}"
         ))
 
     return result
+
+
     
 @app.get("/specialists/", response_model=List[SpecialistResponse])
 def get_all_specialists(category_id: Optional[int] = None, db: Session = Depends(get_db)):
