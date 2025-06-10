@@ -279,67 +279,69 @@ from zoneinfo import ZoneInfo
 
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
-    """Получение всех доступных и актуальных временных слотов на конкретную дату (по московскому времени)"""
+    """
+    Получение всех доступных и актуальных временных слотов на конкретную дату (по московскому времени).
+    Слоты для прошедших дат не возвращаются совсем.
+    """
+    # Москва
+    moscow_tz = ZoneInfo("Europe/Moscow")
+    now_moscow = datetime.now(tz=moscow_tz)
+
+    # Парсим дату из строки
     try:
-        logger.info(f"Запрос слотов на дату: {date}")
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-        # Устанавливаем московский часовой пояс
-        moscow_tz = ZoneInfo("Europe/Moscow")
-        now_moscow = datetime.now(tz=moscow_tz)
-        logger.info(f"Текущее московское время: {now_moscow.isoformat()}")
+    # Если дата в прошлом — сразу пустой список
+    if target_date < now_moscow.date():
+        return []
 
-        # Парсим дату из строки
-        try:
-            target_date = datetime.strptime(date, "%Y-%m-%d").date()
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    # Находим уже занятые слоты на эту дату
+    booked_ids = (
+        db.query(OnlineRegistration.id_time_slot)
+          .join(TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id)
+          .filter(TimeSlot.date == target_date)
+          .all()
+    )
+    booked_ids = {b.id_time_slot for b in booked_ids}
 
-        # Получаем список занятых слотов
-        booked_slot_ids = db.query(OnlineRegistration.id_time_slot).join(
-            TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id
-        ).filter(TimeSlot.date == target_date).all()
-        booked_slot_ids = {slot.id_time_slot for slot in booked_slot_ids}
+    # Базовые фильтры: дата совпадает и не в booked
+    filters = [
+        TimeSlot.date == target_date,
+        ~TimeSlot.id.in_(booked_ids)
+    ]
 
-        # Фильтры для слотов
-        filters = [
-            TimeSlot.date == target_date,
-            ~TimeSlot.id.in_(booked_slot_ids)
-        ]
+    # Если дата — сегодня, отбрасываем слоты, время начала которых уже прошло
+    if target_date == now_moscow.date():
+        filters.append(TimeSlot.time_start > now_moscow.time())
 
-        # Исключаем прошедшие слоты, если сегодня
-        if target_date == now_moscow.date():
-            filters.append(TimeSlot.time_start > now_moscow.time())
+    # Запрос со всеми джоинами
+    slots_query = (
+        db.query(TimeSlot, CategoryService, User)
+          .join(CategoryService, TimeSlot.id_category_service == CategoryService.id)
+          .join(User, TimeSlot.id_employer == User.id)
+          .filter(*filters)
+    )
 
-        slots = db.query(TimeSlot, CategoryService, User).join(
-            CategoryService, TimeSlot.id_category_service == CategoryService.id
-        ).join(
-            User, TimeSlot.id_employer == User.id
-        ).filter(*filters).all()
+    result: List[TimeSlotResponse] = []
+    for ts, service, user in slots_query:
+        start = ts.time_start.strftime("%H:%M")
+        end_time = (
+            datetime.combine(datetime.min, ts.time_start)
+            + timedelta(minutes=service.time_width_minutes_end)
+        ).time().strftime("%H:%M")
 
-        result = []
-        for time_slot, category_service, user in slots:
-            time_start = time_slot.time_start.strftime("%H:%M")
-            duration = category_service.time_width_minutes_end
-            time_end = (
-                datetime.combine(datetime.min, time_slot.time_start) +
-                timedelta(minutes=duration)
-            ).time().strftime("%H:%M")
+        result.append(TimeSlotResponse(
+            id=ts.id,
+            date=ts.date.strftime("%Y-%m-%d"),
+            time_start=start,
+            time_end=end_time,
+            service_name=service.name_category,
+            specialist_name=f"{user.name} {user.last_name}"
+        ))
 
-            result.append(TimeSlotResponse(
-                id=time_slot.id,
-                date=time_slot.date.strftime("%Y-%m-%d"),
-                time_start=time_start,
-                time_end=time_end,
-                service_name=category_service.name_category,
-                specialist_name=f"{user.name} {user.last_name}"
-            ))
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Ошибка при получении слотов: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+    return result
     
 @app.get("/specialists/", response_model=List[SpecialistResponse])
 def get_all_specialists(category_id: Optional[int] = None, db: Session = Depends(get_db)):
