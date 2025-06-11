@@ -88,7 +88,7 @@ services:
       - db_hookah
       - database-init-hookah
 
-  # Telegram Bot hookah
+  # Telegram Bot hookah (Info)
   telegram-bot-hookah:
     build: ./service-telegram-bot
     env_file:
@@ -137,6 +137,17 @@ services:
     depends_on:
       - db_hookah
       - database-init-hookah
+
+  telegram-bot-group-hookah:
+    build: ./service-telegram-bot-group
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_BOT_TOKEN_GROUP: ${TELEGRAM_BOT_TOKEN_GROUP}
+    ports:
+      - "8020:8020"
+    depends_on:
+      - calendar_hookah
 
 volumes:
   postgres_data_hookah:
