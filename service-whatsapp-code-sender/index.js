@@ -8,7 +8,7 @@ const { Pool } = require("pg");
 const path = require("path");
 const cors = require("cors");
 const schedule = require("node-schedule");
-
+const moment = require("moment-timezone");
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -134,7 +134,6 @@ app.post("/send-code/:phone_number", async (req, res) => {
         message: "WhatsApp client not ready",
       });
     }
-
     const cleanPhone = phone_number.replace(/\D/g, "");
     const code = Math.floor(1000 + Math.random() * 9000).toString();
     codesStorage.set(cleanPhone, code);
@@ -253,26 +252,20 @@ app.delete("/clear-code/:code", async (req, res) => {
 // Отправка напоминания о записи
 app.post("/send-notification", async (req, res) => {
   const {
-    phone, // <-- был phone_number, теперь phone
+    phone,
     client_name,
-    appointment_date, // формат 'YYYY-MM-DD'
-    appointment_time, // формат 'HH:MM'
+    appointment_date, // 'YYYY-MM-DD'
+    appointment_time, // 'HH:MM'
     service_name,
     specialist_name,
   } = req.body;
 
   // Валидация
-  if (!phone) {
-    return res.status(400).json({
-      status: "error",
-      message: "Missing required field: phone",
-    });
-  }
-  if (!client_name || !appointment_date || !appointment_time) {
+  if (!phone || !client_name || !appointment_date || !appointment_time) {
     return res.status(400).json({
       status: "error",
       message:
-        "Missing one of: client_name, appointment_date, appointment_time",
+        "Необходимо указать phone, client_name, appointment_date, appointment_time",
     });
   }
   if (!whatsappClient.info) {
@@ -290,44 +283,55 @@ app.post("/send-notification", async (req, res) => {
     `Дата: *${appointment_date}*, время: *${appointment_time}*.\n` +
     `Ждём вас! 😊`;
 
-  // Сразу при первичной записи
+  // 1) Сразу при бронировании
   await sendWhatsAppMessage(phone, buildMessage());
 
-  // Парсим дату/время визита
-  const [Y, M, D] = appointment_date.split("-").map(Number);
-  const [h, m] = appointment_time.split(":").map(Number);
-  const visitDate = new Date(Y, M - 1, D, 8, 0, 0); // 8:00 Москвы
-  const now = new Date();
+  // 2) Парсим дату/время визита и приводим к московскому 08:00
+  const visitMoment = moment
+    .tz(
+      `${appointment_date} ${appointment_time}`,
+      "YYYY-MM-DD HH:mm",
+      "Europe/Moscow"
+    )
+    .hour(8)
+    .minute(0)
+    .second(0);
+
+  const now = moment.tz("Europe/Moscow");
 
   // Хелпер для планирования
-  const scheduleReminder = (targetDate, label) => {
-    if (targetDate > now) {
+  function scheduleReminder(targetMoment, label) {
+    if (targetMoment.isAfter(now)) {
       console.log(
-        `Планируем напоминание "${label}" на ${targetDate.toString()}`
+        `Планируем напоминание "${label}" на ${targetMoment.format()}`
       );
-      schedule.scheduleJob(targetDate, async () => {
-        console.log(`Отправляем запланированное напоминание: ${label}`);
+      schedule.scheduleJob(targetMoment.toDate(), async () => {
+        console.log(`Отправляем напоминание: ${label}`);
         await sendWhatsAppMessage(phone, buildMessage());
       });
     } else {
       console.log(
-        `Пропускаем "${label}", время ${targetDate.toString()} уже прошло`
+        `Пропускаем "${label}", время ${targetMoment.format()} уже прошло`
       );
     }
-  };
+  }
 
   // 3 дня до визита
-  const threeDaysBefore = new Date(visitDate.getTime() - 3 * 24 * 3600 * 1000);
-  scheduleReminder(threeDaysBefore, "за 3 дня до визита");
+  scheduleReminder(
+    visitMoment.clone().subtract(3, "days"),
+    "за 3 дня до визита"
+  );
 
   // 1 день до визита
-  const oneDayBefore = new Date(visitDate.getTime() - 1 * 24 * 3600 * 1000);
-  scheduleReminder(oneDayBefore, "за 1 день до визита");
+  scheduleReminder(
+    visitMoment.clone().subtract(1, "day"),
+    "за 1 день до визита"
+  );
 
-  // В день визита в 8:00
-  scheduleReminder(visitDate, "в день визита");
+  // В день визита в 08:00
+  scheduleReminder(visitMoment, "в день визита");
 
-  return res.json({ status: "success", message: "Notifications scheduled" });
+  res.json({ status: "success", message: "Notifications scheduled" });
 });
 
 // Запуск сервера
