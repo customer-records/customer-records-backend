@@ -280,29 +280,30 @@ def get_all_services(db: Session = Depends(get_db)):
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
     """
-    Возвращает актуальные слоты на указанную дату (по московскому времени),
-    отбрасывая те, которые уже в прошлом (и всю прошедшую дату).
+    Возвращает доступные слоты на дату (МСК),
+    отбрасывая прошедшие.
     """
-    # текущий момент в Москве
+    # 1. Текущее московское время
     moscow_tz = ZoneInfo("Europe/Moscow")
     now_msk = datetime.now(moscow_tz)
 
-    # разбираем дату
+    # 2. Парсим дату
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.")
 
-    # берем все незабронированные слоты на эту дату
-    booked_ids = (
+    # 3. Получаем все занятые слоты на эту дату
+    booked_rows = (
         db.query(OnlineRegistration.id_time_slot)
           .join(TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id)
           .filter(TimeSlot.date == target_date)
-          .scalars()
           .all()
     )
-    booked_ids = set(booked_ids)
+    # booked_rows — список кортежей [(id1,), (id2,), ...]
+    booked_ids = {row[0] for row in booked_rows}
 
+    # 4. Берём все невостребованные слоты на дату
     rows = (
         db.query(TimeSlot, CategoryService, User)
           .join(CategoryService, TimeSlot.id_category_service == CategoryService.id)
@@ -316,14 +317,15 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
 
     result: List[TimeSlotResponse] = []
     for ts, svc, usr in rows:
-        # комбинируем дату и время в datetime и приводим к московской tz
+        # Полный datetime слота в Москве
         slot_dt = datetime.combine(ts.date, ts.time_start).replace(tzinfo=moscow_tz)
-        # отбрасываем все, что <= сейчас
+        # Отбрасываем прошлое (включая всю прошедшую дату)
         if slot_dt <= now_msk:
             continue
 
-        # вычисляем конец
+        # Вычисляем конец слота
         end_dt = slot_dt + timedelta(minutes=svc.time_width_minutes_end)
+
         result.append(TimeSlotResponse(
             id               = ts.id,
             date             = ts.date.strftime("%Y-%m-%d"),
