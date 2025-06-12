@@ -60,7 +60,6 @@ def fetch_gigachat_access_token() -> str:
     data = {"scope": GIGACHAT_SCOPE}
 
     try:
-        # Отключаем проверку SSL-сертификата, чтобы обойти self-signed
         resp = requests.post(token_url, headers=headers, data=data, timeout=10, verify=False)
         resp.raise_for_status()
     except Exception:
@@ -99,7 +98,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Обработчик команды /start: отправляет приветственное сообщение.
     """
     await update.message.reply_text(
-        "Привет! Задайте любой вопрос, и я постараюсь помочь с помощью GigaChat."
+        "Здравствуйте! Я виртуальный ассистент стоматологической клиники Denta Rell."
     )
 
 
@@ -117,16 +116,20 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
     }
-    # Задаём начальный контекст (system) перед сообщением пользователя
+    # Система: контекст с инструкциями и упоминанием онлайн-записи
     payload = {
         "model": "GigaChat",
         "messages": [
             {
                 "role": "system",
-                "content": "Ты — вежливый и точный помощник, который отвечает подробно и развернуто на любые вопросы."
+                "content": (
+                    "Ты — администратор стоматологической клиники Denta Rell (сайт: app.denta-rell.ru). "
+                    "Отвечай кратко и по делу и всегда предлагай клиентам записаться на прием онлайн на сайте app.denta-rell.ru."
+                )
             },
             {"role": "user", "content": user_text}
-        ]
+        ],
+        "max_tokens": 200
     }
 
     try:

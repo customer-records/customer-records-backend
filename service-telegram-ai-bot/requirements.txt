@@ -1,3 +1,5 @@
 python-telegram-bot
 httpx
 requests
+fastapi
+dotenv
