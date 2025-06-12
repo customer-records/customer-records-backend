@@ -288,7 +288,7 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         requested = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.")
-    effective_date = requested + timedelta(days=1)
+    effective_date = requested
 
     # Текущая дата по Москве
     today_msk = datetime.now(ZoneInfo("Europe/Moscow")).date()
