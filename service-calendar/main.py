@@ -280,40 +280,36 @@ def get_all_services(db: Session = Depends(get_db)):
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
     """
-    Возвращает доступные слоты на дату+1 (МСК), даже если запрошена сегодняшняя дата.
-    Прошедшие даты (после смещения) → [].
+    Возвращает слоты на дату запроса +1 день. 
+    Если effective_date (date+1) < сегодня (МСК) — возвращает пустой список.
     """
-    # 1. Текущее московское время
-    moscow_tz = ZoneInfo("Europe/Moscow")
-    now_msk = datetime.now(moscow_tz)
-    today = now_msk.date()
-
-    # 2. Парсим входную дату и сразу добавляем +1 день
+    # Парсим входную дату и прибавляем +1 день
     try:
         requested = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.")
-    target_date = requested + timedelta(days=1)
+    effective_date = requested + timedelta(days=1)
 
-    # 3. Если целевая дата уже в прошлом → []
-    if target_date < today:
+    # Текущая дата по Москве
+    today_msk = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    if effective_date < today_msk:
         return []
 
-    # 4. Собираем занятые слоты на target_date
+    # Собираем занятые слоты на effective_date
     booked_rows = (
         db.query(OnlineRegistration.id_time_slot)
           .join(TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id)
-          .filter(TimeSlot.date == target_date)
+          .filter(TimeSlot.date == effective_date)
           .all()
     )
     booked_ids = {row[0] for row in booked_rows}
 
-    # 5. Получаем все незабронированные слоты на target_date
+    # Запрашиваем все слоты на effective_date, исключаем занятые
     rows = (
         db.query(TimeSlot, CategoryService, User)
           .join(CategoryService, TimeSlot.id_category_service == CategoryService.id)
           .join(User, TimeSlot.id_employer == User.id)
-          .filter(TimeSlot.date == target_date)
+          .filter(TimeSlot.date == effective_date)
           .all()
     )
 
@@ -322,7 +318,7 @@ def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
         if ts.id in booked_ids:
             continue
 
-        # 6. Вычисляем окончание слота
+        # Вычисляем время конца слота
         end_time = (
             datetime.combine(datetime.min, ts.time_start)
             + timedelta(minutes=svc.time_width_minutes_end)
