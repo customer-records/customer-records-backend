@@ -250,17 +250,18 @@ app.delete("/clear-code/:code", async (req, res) => {
 });
 
 // Отправка напоминания о записи
+// Отправка напоминания о записи
 app.post("/send-notification", async (req, res) => {
   const {
     phone,
     client_name,
-    appointment_date, // 'YYYY-MM-DD'
-    appointment_time, // 'HH:MM'
+    appointment_date, // приходит как "DD.MM.YYYY"
+    appointment_time, // "HH:mm"
     service_name,
     specialist_name,
   } = req.body;
 
-  // Валидация
+  // Валидация входных данных
   if (!phone || !client_name || !appointment_date || !appointment_time) {
     return res.status(400).json({
       status: "error",
@@ -286,11 +287,12 @@ app.post("/send-notification", async (req, res) => {
   // 1) Сразу при бронировании
   await sendWhatsAppMessage(phone, buildMessage());
 
-  // 2) Парсим дату/время визита и приводим к московскому 08:00
+  // 2) Правильный парсинг даты/времени визита
+  // Формат даты у вас "DD.MM.YYYY", времени — "HH:mm"
   const visitMoment = moment
     .tz(
-      `${appointment_date} ${appointment_time}`,
-      "YYYY-MM-DD HH:mm",
+      `${appointment_date} ${appointment_time}`, // e.g. "12.06.2025 09:00"
+      "DD.MM.YYYY HH:mm", // совпадающий шаблон
       "Europe/Moscow"
     )
     .hour(8)
@@ -299,7 +301,7 @@ app.post("/send-notification", async (req, res) => {
 
   const now = moment.tz("Europe/Moscow");
 
-  // Хелпер для планирования
+  // Хелпер для планирования отложенных напоминаний
   function scheduleReminder(targetMoment, label) {
     if (targetMoment.isAfter(now)) {
       console.log(
@@ -324,7 +326,7 @@ app.post("/send-notification", async (req, res) => {
 
   // 1 день до визита
   scheduleReminder(
-    visitMoment.clone().subtract(1, "day"),
+    visitMoment.clone().subtract(1, "days"),
     "за 1 день до визита"
   );
 
