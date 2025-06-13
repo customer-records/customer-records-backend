@@ -126,14 +126,14 @@ async def send_daily_message():
 def job_listener(event):
     job_id = event.job_id
     if event.code == EVENT_JOB_ADDED:
-        logger.info("Job added to scheduler: %s", job_id)
+        logger.info("Задача добавлена в планировщик: %s", job_id)
     elif event.code == EVENT_JOB_EXECUTED:
-        logger.info("Job executed successfully: %s", job_id)
+        logger.info("Задача успешно выполнена: %s", job_id)
     elif event.code == EVENT_JOB_ERROR:
         logger.error(
-            "Job %s raised an error: %s", 
-            job_id, 
-            getattr(event, 'exception', 'Unknown error')
+            "Задача %s завершилась с ошибкой: %s",
+            job_id,
+            getattr(event, 'exception', 'Неизвестная ошибка')
         )
 
 @app.on_event("startup")
@@ -153,9 +153,20 @@ async def on_startup():
     )
 
     # Планируем ежедневную рассылку в 18:00 МСК
-    scheduler.add_job(send_daily_message, trigger="cron", hour=18, minute=0, id="daily_18_00")
+    job = scheduler.add_job(
+        send_daily_message,
+        trigger="cron",
+        hour=18,
+        minute=0,
+        id="daily_18_00"
+    )
+    logger.info(
+        "Запланирована ежедневная рассылка (job_id=%s) — каждый день в 18:00 МСК", 
+        job.id
+    )
+
     scheduler.start()
-    logger.info("Планировщик запущен — рассылка в 18:00 МСК")
+    logger.info("Планировщик запущен")
 
 @app.get("/")
 async def health_check():
