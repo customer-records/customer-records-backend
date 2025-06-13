@@ -5,6 +5,11 @@ from fastapi import FastAPI
 from telegram import Bot, MessageEntity
 from telegram.error import TelegramError, Conflict
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.events import (
+    EVENT_JOB_ADDED,
+    EVENT_JOB_EXECUTED,
+    EVENT_JOB_ERROR,
+)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -36,7 +41,9 @@ async def mention_listener():
 
     while TARGET_CHAT_ID is None:
         try:
-            updates = await bot.get_updates(offset=offset, timeout=5, allowed_updates=["message"])
+            updates = await bot.get_updates(
+                offset=offset, timeout=5, allowed_updates=["message"]
+            )
             for upd in updates:
                 offset = upd.update_id + 1
                 msg = upd.message
@@ -51,8 +58,10 @@ async def mention_listener():
                             # Приветственное сообщение
                             await bot.send_message(
                                 chat_id=TARGET_CHAT_ID,
-                                text="Привет! Спасибо за упоминание. "
-                                     "Я буду напоминать вам каждый день в 18:00 МСК."
+                                text=(
+                                    "Привет! Спасибо за упоминание. "
+                                    "Я буду напоминать вам каждый день в 18:00 МСК."
+                                )
                             )
                             logger.info("Приветственное сообщение отправлено в %s", TARGET_CHAT_ID)
                             break
@@ -114,6 +123,19 @@ async def send_daily_message():
     except TelegramError as e:
         logger.error("Ошибка при отправке рассылки: %s", e)
 
+def job_listener(event):
+    job_id = event.job_id
+    if event.code == EVENT_JOB_ADDED:
+        logger.info("Job added to scheduler: %s", job_id)
+    elif event.code == EVENT_JOB_EXECUTED:
+        logger.info("Job executed successfully: %s", job_id)
+    elif event.code == EVENT_JOB_ERROR:
+        logger.error(
+            "Job %s raised an error: %s", 
+            job_id, 
+            getattr(event, 'exception', 'Unknown error')
+        )
+
 @app.on_event("startup")
 async def on_startup():
     # Время старта сервиса
@@ -124,8 +146,14 @@ async def on_startup():
     asyncio.create_task(mention_listener())
     logger.info("mention_listener запущен")
 
+    # Добавляем слушатель событий APScheduler
+    scheduler.add_listener(
+        job_listener,
+        EVENT_JOB_ADDED | EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
+    )
+
     # Планируем ежедневную рассылку в 18:00 МСК
-    scheduler.add_job(send_daily_message, trigger="cron", hour=18, minute=0)
+    scheduler.add_job(send_daily_message, trigger="cron", hour=18, minute=0, id="daily_18_00")
     scheduler.start()
     logger.info("Планировщик запущен — рассылка в 18:00 МСК")
 
