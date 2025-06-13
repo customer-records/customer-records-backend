@@ -280,62 +280,61 @@ def get_all_services(db: Session = Depends(get_db)):
 @app.get("/timeslots/{date}", response_model=List[TimeSlotResponse])
 def get_time_slots_by_date(date: str, db: Session = Depends(get_db)):
     """
-    Возвращает доступные слоты на дату (МСК),
-    отбрасывая прошедшие.
+    Возвращает слоты на дату запроса +1 день. 
+    Если effective_date (date+1) < сегодня (МСК) — возвращает пустой список.
     """
-    # 1. Текущее московское время
-    moscow_tz = ZoneInfo("Europe/Moscow")
-    now_msk = datetime.now(moscow_tz)
-
-    # 2. Парсим дату
+    # Парсим входную дату и прибавляем +1 день
     try:
-        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        requested = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD.")
+    effective_date = requested
 
-    # 3. Получаем все занятые слоты на эту дату
+    # Текущая дата по Москве
+    today_msk = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    if effective_date < today_msk:
+        return []
+
+    # Собираем занятые слоты на effective_date
     booked_rows = (
         db.query(OnlineRegistration.id_time_slot)
           .join(TimeSlot, OnlineRegistration.id_time_slot == TimeSlot.id)
-          .filter(TimeSlot.date == target_date)
+          .filter(TimeSlot.date == effective_date)
           .all()
     )
-    # booked_rows — список кортежей [(id1,), (id2,), ...]
     booked_ids = {row[0] for row in booked_rows}
 
-    # 4. Берём все невостребованные слоты на дату
+    # Запрашиваем все слоты на effective_date, исключаем занятые
     rows = (
         db.query(TimeSlot, CategoryService, User)
           .join(CategoryService, TimeSlot.id_category_service == CategoryService.id)
-          .join(User,         TimeSlot.id_employer          == User.id)
-          .filter(
-              TimeSlot.date == target_date,
-              ~TimeSlot.id.in_(booked_ids)
-          )
+          .join(User, TimeSlot.id_employer == User.id)
+          .filter(TimeSlot.date == effective_date)
           .all()
     )
 
     result: List[TimeSlotResponse] = []
     for ts, svc, usr in rows:
-        # Полный datetime слота в Москве
-        slot_dt = datetime.combine(ts.date, ts.time_start).replace(tzinfo=moscow_tz)
-        # Отбрасываем прошлое (включая всю прошедшую дату)
-        if slot_dt <= now_msk:
+        if ts.id in booked_ids:
             continue
 
-        # Вычисляем конец слота
-        end_dt = slot_dt + timedelta(minutes=svc.time_width_minutes_end)
+        # Вычисляем время конца слота
+        end_time = (
+            datetime.combine(datetime.min, ts.time_start)
+            + timedelta(minutes=svc.time_width_minutes_end)
+        ).time()
 
         result.append(TimeSlotResponse(
-            id               = ts.id,
-            date             = ts.date.strftime("%Y-%m-%d"),
-            time_start       = ts.time_start.strftime("%H:%M"),
-            time_end         = end_dt.time().strftime("%H:%M"),
-            service_name     = svc.name_category,
-            specialist_name  = f"{usr.name} {usr.last_name}"
+            id=ts.id,
+            date=ts.date.strftime("%Y-%m-%d"),
+            time_start=ts.time_start.strftime("%H:%M"),
+            time_end=end_time.strftime("%H:%M"),
+            service_name=svc.name_category,
+            specialist_name=f"{usr.name} {usr.last_name}"
         ))
 
     return result
+
 
 
     
