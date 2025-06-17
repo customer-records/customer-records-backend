@@ -1,5 +1,3 @@
-# service-whatsapp-parser/Dockerfile
-
 FROM python:3.9-slim
 
 RUN apt-get update && \
@@ -9,11 +7,16 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Копируем зависимости и ставим
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Копируем код и статические файлы
 COPY . .
+# Копируем заранее подготовленную картинку истории
+COPY story.JPEG /app/story.JPEG
 
+# Создаём папку для профиля Chrome
 RUN mkdir -p /app/chrome-data
 
 EXPOSE 9000

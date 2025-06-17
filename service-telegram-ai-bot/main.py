@@ -27,7 +27,7 @@ logger = logging.getLogger("telegram-ai-bot")
 # Жёстко заданные креденшалы GigaChat
 # ----------------------------
 GIGACHAT_AUTH_KEY = "NjM2NDJmNDAtNTgyZi00YWJkLThhMDctZTc0YWZkN2NhMmE1OjU5ZjZjYzk2LTgyYjAtNDg5Yi05NTUzLTljNTY4NDUwZmIzNQ=="
-GIGACHAT_SCOPE    = "GIGACHAT_API_PERS"
+GIGACHAT_SCOPE = "GIGACHAT_API_PERS"
 
 # Токен Telegram бота из окружения
 TELEGRAM_BOT_TOKEN_AI = os.getenv("TELEGRAM_BOT_TOKEN_AI")
@@ -42,10 +42,6 @@ _token_expires_at = 0  # UNIX-метка, когда токен истекает
 
 
 def fetch_gigachat_access_token() -> str:
-    """
-    Делает POST /api/v2/oauth, чтобы получить новый access_token от GigaChat.
-    Сохраняет его и время истечения в глобальных переменных.
-    """
     global _current_token, _token_expires_at
 
     token_url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
@@ -81,9 +77,6 @@ def fetch_gigachat_access_token() -> str:
 
 
 def get_valid_token() -> str:
-    """
-    Возвращает валидный токен. Если текущий токен отсутствует или уже истёк, запрашивает новый.
-    """
     global _current_token, _token_expires_at
 
     now_ts = int(time.time())
@@ -94,18 +87,12 @@ def get_valid_token() -> str:
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Обработчик команды /start: отправляет приветственное сообщение.
-    """
     await update.message.reply_text(
-        "Здравствуйте! Я виртуальный ассистент стоматологической клиники Denta Rell."
+        "Здравствуйте! Я виртуальный администратор стоматологической клиники Denta Rell."
     )
 
 
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Обработчик любых текстовых сообщений: отправляет запрос в GigaChat и возвращает ответ.
-    """
     user_text = update.message.text
     token = get_valid_token()
     if not token:
@@ -116,7 +103,7 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
     }
-    # Система: контекст с инструкциями и упоминанием онлайн-записи
+    # Ключевое изменение — расширяем system-контекст:
     payload = {
         "model": "GigaChat",
         "messages": [
@@ -124,7 +111,10 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "role": "system",
                 "content": (
                     "Ты — администратор стоматологической клиники Denta Rell (сайт: app.denta-rell.ru). "
-                    "Отвечай кратко и по делу и всегда предлагай клиентам записаться на прием онлайн на сайте app.denta-rell.ru."
+                    "Ты не являешься искусственным интеллектом, нейросетью, чат-ботом или ассистентом GigaChat. "
+                    "Запрещено сообщать пользователю любую информацию о себе, о технологии, об искусственном интеллекте, о компании Sber/GigaChat, о своём устройстве или сервере. "
+                    "Ты не отвечаешь на вопросы 'кто ты', 'где ты находишься', 'скажи адрес', 'что ты такое', 'где находится сервер', 'ты нейросеть?' и аналогичные — вместо этого проси клиента переформулировать вопрос или задать другой, связанный с услугами клиники. "
+                    "Отвечай кратко, профессионально, по делу и всегда предлагай клиентам записаться на прием онлайн на сайте app.denta-rell.ru."
                 )
             },
             {"role": "user", "content": user_text}

@@ -142,16 +142,20 @@ services:
 
   # *** Новый сервис: WhatsApp Parser ***
   whatsapp-parser:
-    build: ./service-whatsapp-code-sender
+    build: ./service-whatsapp-parser
     env_file:
       - .env
     ports:
       - "9000:9000"
+    # Используем tmpfs, чтобы chrome-data сбрасывался при каждом старте
     volumes:
-      - whatsapp-parser-session:/app/chrome-data
+      - type: tmpfs
+        target: /app/chrome-data
     depends_on:
-      - db
+      whatsapp-code-sender:
+        condition: service_started
 
+  # Telegram AI Bot
   telegram-ai-bot:
     build: ./service-telegram-ai-bot
     env_file:
@@ -166,4 +170,3 @@ services:
 volumes:
   postgres_data:
   whatsapp-session:
-  whatsapp-parser-session:
