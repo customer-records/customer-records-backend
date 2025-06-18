@@ -31,9 +31,6 @@ scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 TARGET_CHAT_ID = None
 
 async def mention_listener():
-    """
-    Фоновый polling: ловим упоминание @botusername, определяем chat_id и шлем привет.
-    """
     global TARGET_CHAT_ID
     offset = None
     me = await bot.get_me()
@@ -55,7 +52,6 @@ async def mention_listener():
                         if mention == username:
                             TARGET_CHAT_ID = msg.chat.id
                             logger.info("Определён chat_id через упоминание: %s", TARGET_CHAT_ID)
-                            # Приветственное сообщение
                             await bot.send_message(
                                 chat_id=TARGET_CHAT_ID,
                                 text=(
@@ -74,9 +70,6 @@ async def mention_listener():
         await asyncio.sleep(1)
 
 async def send_daily_message():
-    """
-    Рассылка сообщений в 18:00 МСК в зависимости от дня недели.
-    """
     global TARGET_CHAT_ID
     now = datetime.now(ZoneInfo("Europe/Moscow"))
     logger.info("send_daily_message запущен в %s", now.strftime("%Y-%m-%d %H:%M:%S %Z"))
@@ -84,7 +77,7 @@ async def send_daily_message():
         logger.warning("chat_id не определён — рассылка пропущена")
         return
 
-    weekday = now.weekday()  # 0=Понедельник ... 6=Воскресенье
+    weekday = now.weekday()
     texts = {
         0: "🌙 Всем добрый вечер!\n\n"
            "Сегодня у нас соревнование с кальянщиком 🪕✨. Кто окажется победителем в UFC или MK11, "
@@ -116,9 +109,12 @@ async def send_daily_message():
            "прекрасно помогает расслабиться и насладиться моментом спокойствия. 🍵🧘‍♂️\n"
            "Приглашаем всех провести вечер в уютной атмосфере, наслаждаясь вкусом чая и кальяна. 🪔"
     }
-    text = texts.get(weekday)
+
+    base_text = texts.get(weekday)
+    final_text = f"{base_text}\n\nЗабронировать столик онлайн можете здесь — berlooga.ru"
+    
     try:
-        await bot.send_message(chat_id=TARGET_CHAT_ID, text=text)
+        await bot.send_message(chat_id=TARGET_CHAT_ID, text=final_text)
         logger.info("Ежедневное сообщение отправлено в %s", TARGET_CHAT_ID)
     except TelegramError as e:
         logger.error("Ошибка при отправке рассылки: %s", e)
@@ -138,21 +134,17 @@ def job_listener(event):
 
 @app.on_event("startup")
 async def on_startup():
-    # Время старта сервиса
     startup_time = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d %H:%M:%S %Z")
     logger.info("Сервис запущен в %s", startup_time)
 
-    # Запускаем упоминания
     asyncio.create_task(mention_listener())
     logger.info("mention_listener запущен")
 
-    # Добавляем слушатель событий APScheduler
     scheduler.add_listener(
         job_listener,
         EVENT_JOB_ADDED | EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
     )
 
-    # Планируем ежедневную рассылку в 18:00 МСК
     job = scheduler.add_job(
         send_daily_message,
         trigger="cron",
