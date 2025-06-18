@@ -40,7 +40,6 @@ if not TELEGRAM_BOT_TOKEN_AI:
 _current_token = None
 _token_expires_at = 0  # UNIX-метка, когда токен истекает
 
-
 def fetch_gigachat_access_token() -> str:
     global _current_token, _token_expires_at
 
@@ -75,7 +74,6 @@ def fetch_gigachat_access_token() -> str:
         logger.error("Не удалось извлечь access_token из ответа GigaChat API")
         return ""
 
-
 def get_valid_token() -> str:
     global _current_token, _token_expires_at
 
@@ -85,12 +83,10 @@ def get_valid_token() -> str:
 
     return fetch_gigachat_access_token()
 
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Здравствуйте! Я виртуальный администратор стоматологической клиники Denta Rell."
     )
-
 
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
@@ -103,18 +99,20 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
     }
-    # Ключевое изменение — расширяем system-контекст:
+
     payload = {
         "model": "GigaChat",
         "messages": [
             {
                 "role": "system",
                 "content": (
-                    "Ты — администратор стоматологической клиники Denta Rell (сайт: app.denta-rell.ru). "
-                    "Ты не являешься искусственным интеллектом, нейросетью, чат-ботом или ассистентом GigaChat. "
-                    "Запрещено сообщать пользователю любую информацию о себе, о технологии, об искусственном интеллекте, о компании Sber/GigaChat, о своём устройстве или сервере. "
-                    "Ты не отвечаешь на вопросы 'кто ты', 'где ты находишься', 'скажи адрес', 'что ты такое', 'где находится сервер', 'ты нейросеть?' и аналогичные — вместо этого проси клиента переформулировать вопрос или задать другой, связанный с услугами клиники. "
-                    "Отвечай кратко, профессионально, по делу и всегда предлагай клиентам записаться на прием онлайн на сайте app.denta-rell.ru."
+                    "Ты — виртуальный администратор стоматологической клиники Denta Rell (сайт: app.denta-rell.ru). "
+                    "Отвечай только на вопросы, связанные с услугами, акциями, расписанием, специалистами и записью в клинику. "
+                    "Запрещено отвечать на любые вопросы о себе, о своих технологиях, устройстве, происхождении, личности, компании Sber, GigaChat, Telegram или искусственном интеллекте. "
+                    "Не упоминай слова 'я бот', 'я ИИ', 'я модель', 'я ассистент', 'GigaChat', 'искусственный интеллект' и всё подобное. "
+                    "Если клиент задаёт вопрос не по теме стоматологии, услуг или записи — мягко перенаправь его, например: «Пожалуйста, уточните, чем мы можем помочь вам в рамках стоматологической клиники Denta Rell». "
+                    "Твоя задача — помогать как администратор: кратко, профессионально, вежливо и только по теме. "
+                    "В каждом подходящем случае предлагай записаться онлайн на сайте app.denta-rell.ru."
                 )
             },
             {"role": "user", "content": user_text}
@@ -173,7 +171,6 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Не удалось разобрать ответ от GigaChat:")
         await update.message.reply_text("Не удалось получить ответ от GigaChat.")
 
-
 def main():
     if not TELEGRAM_BOT_TOKEN_AI:
         logger.error("Переменная окружения TELEGRAM_BOT_TOKEN_AI не задана")
@@ -185,7 +182,6 @@ def main():
 
     logger.info("Telegram AI Bot с GigaChat запущен (polling)...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
